@@ -139,6 +139,320 @@ function applyCodexCliAdaptation(body = {}) {
   body.instructions = CODEX_CLI_INSTRUCTIONS
 }
 
+const SUPPORTED_IMAGE_MODELS = new Set(['gpt-image-2'])
+const SUPPORTED_IMAGE_SIZES = new Set(['1024x1024', '1536x1024', '1024x1536'])
+const SUPPORTED_IMAGE_QUALITIES = new Set(['low', 'medium', 'high', 'auto'])
+const DEFAULT_IMAGE_HOST_MODEL = 'gpt-5.4'
+
+function invalidImageRequest(message, param = null, code = 'invalid_request') {
+  return {
+    error: {
+      message,
+      type: 'invalid_request_error',
+      param,
+      code
+    }
+  }
+}
+
+function validateImageGenerationRequest(body = {}) {
+  if (!body || typeof body !== 'object') {
+    return invalidImageRequest('Request body must be a JSON object')
+  }
+
+  if (!body.prompt || typeof body.prompt !== 'string') {
+    return invalidImageRequest('Missing required parameter: prompt', 'prompt')
+  }
+
+  if (body.model && !SUPPORTED_IMAGE_MODELS.has(body.model)) {
+    return invalidImageRequest(`Unsupported image model: ${body.model}`, 'model')
+  }
+
+  if (body.n !== undefined && body.n !== 1) {
+    return invalidImageRequest('Images generation currently supports n=1 only', 'n')
+  }
+
+  if (body.size && body.size !== 'auto' && !SUPPORTED_IMAGE_SIZES.has(body.size)) {
+    return invalidImageRequest(`Unsupported image size: ${body.size}`, 'size')
+  }
+
+  if (body.quality && !SUPPORTED_IMAGE_QUALITIES.has(body.quality)) {
+    return invalidImageRequest(`Unsupported image quality: ${body.quality}`, 'quality')
+  }
+
+  return null
+}
+
+function buildImageGenerationResponsesPayload(body = {}, hostModel = DEFAULT_IMAGE_HOST_MODEL) {
+  const imageModel = body.model || 'gpt-image-2'
+  const size = body.size && body.size !== 'auto' ? body.size : '1024x1024'
+  const quality = body.quality || 'medium'
+  const outputFormat = body.output_format || 'png'
+  const background = body.background || 'opaque'
+
+  return {
+    model: hostModel || DEFAULT_IMAGE_HOST_MODEL,
+    store: false,
+    instructions:
+      'You are an assistant that must fulfill image generation requests by using the image_generation tool when provided.',
+    input: [
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: body.prompt }]
+      }
+    ],
+    tools: [
+      {
+        type: 'image_generation',
+        model: imageModel,
+        size,
+        quality,
+        output_format: outputFormat,
+        background,
+        partial_images: body.partial_images || 1
+      }
+    ],
+    tool_choice: {
+      type: 'allowed_tools',
+      mode: 'required',
+      tools: [{ type: 'image_generation' }]
+    },
+    stream: true
+  }
+}
+
+function findImageGenerationB64(value) {
+  let found = null
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findImageGenerationB64(item)
+      if (nested) {
+        found = nested
+      }
+    }
+    return found
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  if (value.type === 'image_generation_call' && typeof value.result === 'string' && value.result) {
+    found = value.result
+  }
+
+  if (typeof value.partial_image_b64 === 'string' && value.partial_image_b64) {
+    found = value.partial_image_b64
+  }
+
+  for (const child of Object.values(value)) {
+    const nested = findImageGenerationB64(child)
+    if (nested) {
+      found = nested
+    }
+  }
+
+  return found
+}
+
+function parseSseJsonEvents(text = '') {
+  const events = []
+  let eventName = null
+  let dataLines = []
+
+  const flush = () => {
+    if (dataLines.length === 0) {
+      eventName = null
+      return
+    }
+
+    const raw = dataLines.join('\n').trim()
+    const currentEventName = eventName
+    eventName = null
+    dataLines = []
+
+    if (!raw || raw === '[DONE]') {
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && currentEventName && !parsed.type) {
+        parsed.type = currentEventName
+      }
+      events.push(parsed)
+    } catch (error) {
+      logger.debug('Failed to parse image generation SSE event:', error.message)
+    }
+  }
+
+  for (const line of String(text).replace(/\r\n/g, '\n').split('\n')) {
+    if (line === '') {
+      flush()
+    } else if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart())
+    }
+  }
+  flush()
+
+  return events
+}
+
+function extractImageGenerationB64FromSse(text = '') {
+  let latest = null
+  for (const event of parseSseJsonEvents(text)) {
+    const found = findImageGenerationB64(event)
+    if (found) {
+      latest = found
+    }
+  }
+  return latest
+}
+
+function extractResponsesUsageFromSse(text = '') {
+  let usage = null
+  for (const event of parseSseJsonEvents(text)) {
+    if (event?.response?.usage) {
+      const { usage: responseUsage } = event.response
+      usage = responseUsage
+    } else if (event?.usage) {
+      const { usage: eventUsage } = event
+      usage = eventUsage
+    }
+  }
+  return usage
+}
+
+async function collectStreamBody(stream) {
+  if (!stream || typeof stream.on !== 'function') {
+    return typeof stream === 'string' ? stream : JSON.stringify(stream || '')
+  }
+
+  const chunks = []
+  await new Promise((resolve, reject) => {
+    stream.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+    })
+    stream.on('end', resolve)
+    stream.on('error', reject)
+  })
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function recordImageGenerationUsage(req, usage, model, accountId, accountType, statusCode) {
+  if (!usage) {
+    return
+  }
+
+  const totalInputTokens = usage.input_tokens || usage.prompt_tokens || 0
+  const outputTokens = usage.output_tokens || usage.completion_tokens || 0
+  const cacheReadTokens = extractOpenAICacheReadTokens(usage)
+  const actualInputTokens = Math.max(0, totalInputTokens - cacheReadTokens)
+
+  const costs = await apiKeyService.recordUsage(
+    req.apiKey.id,
+    actualInputTokens,
+    outputTokens,
+    0,
+    cacheReadTokens,
+    model,
+    accountId,
+    accountType,
+    req._serviceTier || null,
+    createRequestDetailMeta(req, {
+      requestBody: req.body,
+      stream: true,
+      statusCode
+    })
+  )
+
+  await applyRateLimitTracking(
+    req,
+    {
+      inputTokens: actualInputTokens,
+      outputTokens,
+      cacheCreateTokens: 0,
+      cacheReadTokens
+    },
+    model,
+    'openai-images-generation',
+    accountType,
+    costs
+  )
+}
+
+function extractFirstEventError(text = '') {
+  return parseSseJsonEvents(text).find((event) => event?.error)?.error || null
+}
+
+function parseJsonErrorPayload(text = '') {
+  const trimmed = String(text || '').trim()
+  if (!trimmed.startsWith('{')) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch (_) {
+    return null
+  }
+}
+
+function getImageGenerationErrorStatus(upstreamStatus, eventError) {
+  if (upstreamStatus >= 400) {
+    return upstreamStatus
+  }
+
+  if (!eventError) {
+    return null
+  }
+
+  if (eventError.type === 'usage_limit_reached' || eventError.code === 'rate_limit_exceeded') {
+    return 429
+  }
+
+  if (
+    eventError.type === 'unauthorized' ||
+    eventError.type === 'authentication_error' ||
+    eventError.code === 'unauthorized'
+  ) {
+    return 401
+  }
+
+  return 502
+}
+
+async function updateImageGenerationAccountHealth(status, eventError, accountId, accountType) {
+  if (!accountId) {
+    return
+  }
+
+  if (status === 429) {
+    await unifiedOpenAIScheduler.markAccountRateLimited(
+      accountId,
+      accountType,
+      null,
+      eventError?.resets_in_seconds || null
+    )
+    return
+  }
+
+  if (status === 401 || status === 402) {
+    const message = eventError?.message ? `: ${eventError.message}` : ''
+    await unifiedOpenAIScheduler.markAccountUnauthorized(
+      accountId,
+      accountType,
+      null,
+      `OpenAI account auth failed (${status})${message}`
+    )
+  }
+}
+
 async function applyRateLimitTracking(
   req,
   usageSummary,
@@ -965,7 +1279,141 @@ const handleResponses = async (req, res) => {
   }
 }
 
-// 注册两个路由路径，都使用相同的处理函数
+async function handleImageGeneration(req, res) {
+  const apiKeyData = req.apiKey || {}
+
+  if (!checkOpenAIPermissions(apiKeyData)) {
+    logger.security(
+      `🚫 API Key ${apiKeyData.id || 'unknown'} 缺少 OpenAI 权限，拒绝访问 ${req.originalUrl}`
+    )
+    return res.status(403).json({
+      error: {
+        message: 'This API key does not have permission to access OpenAI',
+        type: 'permission_denied',
+        code: 'permission_denied'
+      }
+    })
+  }
+
+  const validationError = validateImageGenerationRequest(req.body)
+  if (validationError) {
+    return res.status(400).json(validationError)
+  }
+
+  const hostModel = DEFAULT_IMAGE_HOST_MODEL
+  const responsesPayload = buildImageGenerationResponsesPayload(req.body, hostModel)
+
+  let accountId = null
+  let accountType = 'openai'
+  let proxy = null
+  let account = null
+  let accessToken = null
+
+  try {
+    ;({ accessToken, accountId, accountType, proxy, account } = await getOpenAIAuthToken(
+      apiKeyData,
+      null,
+      hostModel
+    ))
+
+    const proxyAgent = createProxyAgent(proxy)
+    let targetUrl
+    let headers
+
+    if (accountType === 'openai-responses') {
+      const baseApi = account.baseApi || 'https://api.openai.com/v1'
+      const targetPath = baseApi.endsWith('/v1') ? '/responses' : '/v1/responses'
+      targetUrl = `${baseApi}${targetPath}`
+      headers = {
+        Authorization: `Bearer ${account.apiKey}`,
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json'
+      }
+    } else {
+      targetUrl = 'https://chatgpt.com/backend-api/codex/responses'
+      headers = {
+        authorization: `Bearer ${accessToken}`,
+        'chatgpt-account-id': account.accountId || account.chatgptUserId || accountId,
+        host: 'chatgpt.com',
+        accept: 'text/event-stream',
+        'content-type': 'application/json'
+      }
+    }
+
+    const axiosConfig = {
+      headers,
+      timeout: config.requestTimeout || 600000,
+      responseType: 'stream',
+      validateStatus: () => true
+    }
+
+    if (proxyAgent) {
+      axiosConfig.httpAgent = proxyAgent
+      axiosConfig.httpsAgent = proxyAgent
+      axiosConfig.proxy = false
+    }
+
+    const upstream = await axios.post(targetUrl, responsesPayload, axiosConfig)
+    const upstreamBody = await collectStreamBody(upstream.data)
+    const sseError = extractFirstEventError(upstreamBody)
+    const jsonErrorPayload = parseJsonErrorPayload(upstreamBody)
+    const upstreamError = sseError || jsonErrorPayload?.error || null
+    const errorStatus = getImageGenerationErrorStatus(upstream.status, upstreamError)
+
+    if (errorStatus) {
+      let errorPayload = { error: upstreamError || { message: 'Upstream image generation failed' } }
+      await updateImageGenerationAccountHealth(errorStatus, upstreamError, accountId, accountType)
+      if (!upstreamError && jsonErrorPayload) {
+        errorPayload = jsonErrorPayload
+      }
+      return res.status(errorStatus).json(errorPayload)
+    }
+
+    const imageB64 = extractImageGenerationB64FromSse(upstreamBody)
+    if (!imageB64) {
+      return res.status(502).json({
+        error: {
+          message: 'Responses image_generation result did not contain image data',
+          type: 'api_error',
+          code: 'missing_image_result'
+        }
+      })
+    }
+
+    const usage = extractResponsesUsageFromSse(upstreamBody)
+    await recordImageGenerationUsage(
+      req,
+      usage,
+      hostModel,
+      accountId,
+      accountType,
+      upstream.status || 200
+    )
+    return res.status(upstream.status || 200).json({
+      created: Math.floor(Date.now() / 1000),
+      data: [{ b64_json: imageB64 }],
+      ...(usage ? { usage } : {})
+    })
+  } catch (error) {
+    logger.error('OpenAI images generation compatibility route failed:', {
+      message: error.message,
+      status: error.statusCode || error.response?.status,
+      accountId,
+      accountType
+    })
+    const status = error.statusCode || error.response?.status || 500
+    return res.status(status).json({
+      error: {
+        message: getSafeMessage(error),
+        type: status >= 500 ? 'api_error' : 'invalid_request_error'
+      }
+    })
+  }
+}
+
+// 注册路由路径
+router.post('/images/generations', authenticateApiKey, handleImageGeneration)
+router.post('/v1/images/generations', authenticateApiKey, handleImageGeneration)
 router.post('/responses', authenticateApiKey, handleResponses)
 router.post('/v1/responses', authenticateApiKey, handleResponses)
 router.post('/responses/compact', authenticateApiKey, handleResponses)
@@ -1037,4 +1485,7 @@ router.get('/key-info', authenticateApiKey, async (req, res) => {
 
 module.exports = router
 module.exports.handleResponses = handleResponses
+module.exports.handleImageGeneration = handleImageGeneration
+module.exports.buildImageGenerationResponsesPayload = buildImageGenerationResponsesPayload
+module.exports.extractImageGenerationB64FromSse = extractImageGenerationB64FromSse
 module.exports.CODEX_CLI_INSTRUCTIONS = CODEX_CLI_INSTRUCTIONS
