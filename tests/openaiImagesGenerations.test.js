@@ -286,6 +286,12 @@ describe('openai images generations compatibility route', () => {
       'gpt-5.4'
     )
     expect(axios.post).toHaveBeenCalled()
+    expect(axios.post.mock.calls[0][2].headers).toMatchObject({
+      authorization: 'Bearer decrypted-token',
+      'chatgpt-account-id': 'chatgpt-account-1',
+      originator: 'codex_cli_rs',
+      'user-agent': 'chatcrs/0.1.0 (OpenAIImagesGeneration)'
+    })
     expect(axios.post.mock.calls[0][1]).toMatchObject({
       model: 'gpt-5.4',
       stream: true,
