@@ -142,7 +142,7 @@ function applyCodexCliAdaptation(body = {}) {
 const SUPPORTED_IMAGE_MODELS = new Set(['gpt-image-2'])
 const SUPPORTED_IMAGE_SIZES = new Set(['1024x1024', '1536x1024', '1024x1536'])
 const SUPPORTED_IMAGE_QUALITIES = new Set(['low', 'medium', 'high', 'auto'])
-const DEFAULT_IMAGE_HOST_MODEL = 'gpt-5.4'
+const DEFAULT_IMAGE_HOST_MODEL = process.env.OPENAI_IMAGES_HOST_MODEL || 'gpt-5.4'
 
 function invalidImageRequest(message, param = null, code = 'invalid_request') {
   return {
@@ -1336,7 +1336,9 @@ async function handleImageGeneration(req, res) {
         'chatgpt-account-id': account.accountId || account.chatgptUserId || accountId,
         host: 'chatgpt.com',
         accept: 'text/event-stream',
-        'content-type': 'application/json'
+        'content-type': 'application/json',
+        'user-agent': 'chatcrs/0.1.0 (OpenAIImagesGeneration)',
+        originator: 'codex_cli_rs'
       }
     }
 
