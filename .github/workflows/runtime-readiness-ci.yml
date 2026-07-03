@@ -19,6 +19,17 @@ jobs:
     name: Runtime Readiness and Image API Tests
     runs-on: ubuntu-latest
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,3 +51,67 @@ jobs:
 
       - name: Run runtime readiness and Images API regression tests
         run: npx jest tests/runtimeReadinessVerifier.test.js tests/openaiImagesGenerations.test.js --runInBand
+
+      - name: Build admin SPA
+        run: |
+          cd web/admin-spa
+          npm ci --prefer-offline --no-audit
+          npm run build
+
+      - name: Run real CRS runtime readiness smoke
+        env:
+          PORT: '12395'
+          HOST: 127.0.0.1
+          NODE_ENV: production
+          JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          REDIS_DB: '15'
+          ADMIN_USERNAME: ci_admin
+          ADMIN_PASSWORD: ci_admin_password
+        run: |
+          set -euo pipefail
+          cp config/config.example.js config/config.js
+          mkdir -p data logs temp
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path('data/init.json').write_text(json.dumps({
+              'initializedAt': '2026-01-01T00:00:00.000Z',
+              'adminUsername': 'ci_admin',
+              'adminPassword': 'ci_admin_password',
+              'version': '1.0.0'
+          }, indent=2))
+          PY
+          cat > .env <<'EOF'
+          PORT=12395
+          HOST=127.0.0.1
+          NODE_ENV=production
+          JWT_SECRET=ci-jwt-secret-ci-jwt-secret-ci-jwt-secret
+          ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+          REDIS_HOST=127.0.0.1
+          REDIS_PORT=6379
+          REDIS_DB=15
+          REDIS_PASSWORD=
+          LOG_LEVEL=warn
+          EOF
+          node src/app.js > logs/ci-runtime.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 45); do
+            if node scripts/verify-runtime-readiness.js --base-url http://127.0.0.1:12395 --timeout-ms 5000 --json > readiness.json 2> readiness.err; then
+              cat readiness.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'CRS runtime readiness failed' >&2
+          cat readiness.json 2>/dev/null || true
+          cat readiness.err 2>/dev/null || true
+          cat logs/ci-runtime.log 2>/dev/null || true
+          exit 1

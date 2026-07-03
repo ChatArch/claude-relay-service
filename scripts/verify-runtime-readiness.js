@@ -51,6 +51,14 @@ function joinUrl(baseUrl, path) {
   return new URL(path, base).toString()
 }
 
+function resolveUrl(baseUrl, path, fromPath = '/') {
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+  const base = new URL(fromPath, new URL(baseUrl))
+  return new URL(path, base).toString()
+}
+
 function requestUrl(url, options = {}) {
   const method = options.method || 'GET'
   const timeoutMs = options.timeoutMs || 5000
@@ -109,13 +117,34 @@ function extractAdminAssets(html) {
   while ((match = attrRegex.exec(html))) {
     assets.add(match[1])
   }
-  return Array.from(assets).slice(0, 6)
+  return Array.from(assets)
 }
 
 async function checkHealth(baseUrl, timeoutMs) {
   const response = await requestUrl(joinUrl(baseUrl, '/health'), { timeoutMs })
-  return result('health endpoint returns 200', response.ok && response.status === 200, {
+
+  let payload = null
+  try {
+    payload = response.body ? JSON.parse(response.body) : null
+  } catch (error) {
+    payload = null
+  }
+
+  const components = payload && payload.components ? payload.components : {}
+  const unhealthyComponents = Object.entries(components)
+    .filter(([, component]) => component && component.status && component.status !== 'healthy')
+    .map(([name, component]) => `${name}:${component.status}`)
+  const ok =
+    response.ok &&
+    response.status === 200 &&
+    payload &&
+    payload.status === 'healthy' &&
+    unhealthyComponents.length === 0
+
+  return result('health endpoint returns healthy status', ok, {
     status: response.status,
+    serviceStatus: payload && payload.status,
+    unhealthyComponents,
     error: response.error
   })
 }
@@ -158,8 +187,8 @@ async function checkAdminSpa(baseUrl, timeoutMs) {
     return results
   }
 
-  for (const asset of assets.slice(0, 3)) {
-    const assetUrl = asset.startsWith('http') ? asset : joinUrl(baseUrl, asset)
+  for (const asset of assets) {
+    const assetUrl = resolveUrl(baseUrl, asset, '/admin-next/')
     const assetResponse = await requestUrl(assetUrl, { timeoutMs })
     const contentType = assetResponse.headers['content-type'] || ''
     const ok =
