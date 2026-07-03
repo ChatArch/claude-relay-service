@@ -21,7 +21,8 @@ function send(res, status, body, headers = {}) {
 
 describe('runtime readiness verifier', () => {
   test('extracts admin SPA JS and CSS assets', () => {
-    const html = '<html><head><link href="/admin-next/assets/app.css" rel="stylesheet"></head><body><script src="/admin-next/assets/app.js"></script></body></html>'
+    const html =
+      '<html><head><link href="/admin-next/assets/app.css" rel="stylesheet"></head><body><script src="/admin-next/assets/app.js"></script></body></html>'
     expect(extractAdminAssets(html)).toEqual([
       '/admin-next/assets/app.css',
       '/admin-next/assets/app.js'
@@ -30,7 +31,8 @@ describe('runtime readiness verifier', () => {
 
   test('passes only when health, web assets, and auth-required API routes are present', async () => {
     const server = await startServer((req, res) => {
-      if (req.url === '/health') return send(res, 200, '{"status":"healthy"}', { 'content-type': 'application/json' })
+      if (req.url === '/health')
+        return send(res, 200, '{"status":"healthy"}', { 'content-type': 'application/json' })
       if (req.url === '/') return send(res, 302, '', { location: '/admin-next/api-stats' })
       if (req.url === '/web') return send(res, 302, '', { location: '/admin-next/api-stats' })
       if (req.url === '/admin-next/') {
@@ -54,7 +56,9 @@ describe('runtime readiness verifier', () => {
       const summary = await runReadinessChecks({ baseUrl: server.baseUrl, timeoutMs: 1000 })
       expect(summary.ok).toBe(true)
       expect(summary.checks.map((check) => check.name)).toContain('admin SPA HTML is served')
-      expect(summary.checks.map((check) => check.name)).toContain('OpenAI images route is mounted and requires auth')
+      expect(summary.checks.map((check) => check.name)).toContain(
+        'OpenAI images route is mounted and requires auth'
+      )
     } finally {
       await server.close()
     }
@@ -91,9 +95,14 @@ describe('runtime readiness verifier', () => {
       if (req.url === '/') return send(res, 302, '', { location: '/admin-next/api-stats' })
       if (req.url === '/web') return send(res, 302, '', { location: '/admin-next/api-stats' })
       if (req.url === '/admin-next/') {
-        return send(res, 200, '<html><body><div id="app"></div><script src="/admin-next/assets/app.js"></script></body></html>')
+        return send(
+          res,
+          200,
+          '<html><body><div id="app"></div><script src="/admin-next/assets/app.js"></script></body></html>'
+        )
       }
-      if (req.url === '/admin-next/assets/app.js') return send(res, 200, 'console.log("ok")', { 'content-type': 'application/javascript' })
+      if (req.url === '/admin-next/assets/app.js')
+        return send(res, 200, 'console.log("ok")', { 'content-type': 'application/javascript' })
       if (req.url === '/openai/v1/responses') return send(res, 401, '{"error":"missing auth"}')
       if (req.url === '/openai/v1/images/generations') return send(res, 404, 'not found')
       return send(res, 404, 'not found')

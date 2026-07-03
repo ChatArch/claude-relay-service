@@ -151,7 +151,9 @@ function createRes() {
 }
 
 function sseStream(events) {
-  return Readable.from(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`))
+  return Readable.from(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+  )
 }
 
 describe('openai images generations compatibility route', () => {

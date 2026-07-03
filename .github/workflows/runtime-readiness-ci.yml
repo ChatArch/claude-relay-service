@@ -1,0 +1,42 @@
+name: Runtime Readiness CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+      - 'test/**'
+      - 'ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-readiness:
+    name: Runtime Readiness and Image API Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Check formatting for runtime readiness files
+        run: npx prettier --check scripts/verify-runtime-readiness.js tests/runtimeReadinessVerifier.test.js tests/openaiImagesGenerations.test.js
+
+      - name: Lint runtime readiness script
+        run: npx eslint scripts/verify-runtime-readiness.js
+
+      - name: Run runtime readiness and Images API regression tests
+        run: npx jest tests/runtimeReadinessVerifier.test.js tests/openaiImagesGenerations.test.js --runInBand
