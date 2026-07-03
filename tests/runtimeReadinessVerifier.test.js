@@ -31,10 +31,15 @@ describe('runtime readiness verifier', () => {
 
   test('passes only when health, web assets, and auth-required API routes are present', async () => {
     const server = await startServer((req, res) => {
-      if (req.url === '/health')
+      if (req.url === '/health') {
         return send(res, 200, '{"status":"healthy"}', { 'content-type': 'application/json' })
-      if (req.url === '/') return send(res, 302, '', { location: '/admin-next/api-stats' })
-      if (req.url === '/web') return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
+      if (req.url === '/') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
+      if (req.url === '/web') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
       if (req.url === '/admin-next/') {
         return send(
           res,
@@ -66,9 +71,15 @@ describe('runtime readiness verifier', () => {
 
   test('fails when admin SPA dist is missing even if health passes', async () => {
     const server = await startServer((req, res) => {
-      if (req.url === '/health') return send(res, 200, '{"status":"healthy"}')
-      if (req.url === '/') return send(res, 302, '', { location: '/admin-next/api-stats' })
-      if (req.url === '/web') return send(res, 302, '', { location: '/admin-next/api-stats' })
+      if (req.url === '/health') {
+        return send(res, 200, '{"status":"healthy"}')
+      }
+      if (req.url === '/') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
+      if (req.url === '/web') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
       if (req.url === '/openai/v1/responses' || req.url === '/openai/v1/images/generations') {
         return send(res, 401, '{"error":"missing auth"}')
       }
@@ -91,9 +102,15 @@ describe('runtime readiness verifier', () => {
 
   test('fails when Images API route is absent even if web is healthy', async () => {
     const server = await startServer((req, res) => {
-      if (req.url === '/health') return send(res, 200, '{"status":"healthy"}')
-      if (req.url === '/') return send(res, 302, '', { location: '/admin-next/api-stats' })
-      if (req.url === '/web') return send(res, 302, '', { location: '/admin-next/api-stats' })
+      if (req.url === '/health') {
+        return send(res, 200, '{"status":"healthy"}')
+      }
+      if (req.url === '/') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
+      if (req.url === '/web') {
+        return send(res, 302, '', { location: '/admin-next/api-stats' })
+      }
       if (req.url === '/admin-next/') {
         return send(
           res,
@@ -101,10 +118,15 @@ describe('runtime readiness verifier', () => {
           '<html><body><div id="app"></div><script src="/admin-next/assets/app.js"></script></body></html>'
         )
       }
-      if (req.url === '/admin-next/assets/app.js')
+      if (req.url === '/admin-next/assets/app.js') {
         return send(res, 200, 'console.log("ok")', { 'content-type': 'application/javascript' })
-      if (req.url === '/openai/v1/responses') return send(res, 401, '{"error":"missing auth"}')
-      if (req.url === '/openai/v1/images/generations') return send(res, 404, 'not found')
+      }
+      if (req.url === '/openai/v1/responses') {
+        return send(res, 401, '{"error":"missing auth"}')
+      }
+      if (req.url === '/openai/v1/images/generations') {
+        return send(res, 404, 'not found')
+      }
       return send(res, 404, 'not found')
     })
 
