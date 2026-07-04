@@ -103,8 +103,8 @@
   "author": "ChatArch",
   "license": "MIT",
   "bin": {
-    "crs": "./scripts/manage.js",
-    "claude-relay-service": "./scripts/manage.js"
+    "crs": "scripts/manage.js",
+    "claude-relay-service": "scripts/manage.js"
   },
   "files": [
     "src/",
