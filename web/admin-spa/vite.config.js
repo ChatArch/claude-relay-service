@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       checker({
+        // Keep lint diagnostics in the dev server, but do not block packaged production builds.
+        // The npm package install path should be able to run `npm run build:web` without
+        // requiring source-tree lint state to be perfect.
+        enableBuild: false,
         eslint: {
           lintCommand: 'eslint "./src/**/*.{js,vue}" --cache=false',
           dev: {

@@ -121,6 +121,7 @@
     "web/admin-spa/tailwind.config.js",
     "web/admin-spa/postcss.config.js",
     "web/admin-spa/.env.example",
+    "web/admin-spa/.eslintrc.cjs",
     "Dockerfile",
     "docker-compose.yml",
     "docker-entrypoint.sh",
