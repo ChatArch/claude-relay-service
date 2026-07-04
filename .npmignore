@@ -1,0 +1,20 @@
+# Never publish local/runtime state or credentials
+.env
+.env.*
+!.env.example
+data/
+logs/
+temp/
+*.log
+
+# Development / CI metadata
+.git/
+.github/
+tests/
+coverage/
+.nyc_output/
+node_modules/
+.DS_Store
+
+# Local package artifacts
+*.tgz
