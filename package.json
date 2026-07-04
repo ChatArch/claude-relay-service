@@ -1,5 +1,5 @@
 {
-  "name": "claude-relay-service",
+  "name": "@chatarch/claude-relay-service",
   "version": "1.0.0",
   "description": "ChatArch-maintained Claude Relay Service Node.js API relay with OpenAI-compatible routing and runtime readiness gates",
   "main": "src/app.js",
