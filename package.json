@@ -1,7 +1,7 @@
 {
-  "name": "claude-relay-service",
+  "name": "@chatarch/claude-relay-service",
   "version": "1.0.0",
-  "description": "Claude Code API relay service with multi-account management, OpenAI compatibility, and API key authentication",
+  "description": "ChatArch-maintained Claude Relay Service Node.js API relay with OpenAI-compatible routing and runtime readiness gates",
   "main": "src/app.js",
   "scripts": {
     "start": "npm run lint && node src/app.js",
@@ -100,6 +100,47 @@
     "claude-code",
     "anthropic"
   ],
-  "author": "Claude Relay Service",
-  "license": "MIT"
+  "author": "ChatArch",
+  "license": "MIT",
+  "bin": {
+    "crs": "scripts/manage.js",
+    "claude-relay-service": "scripts/manage.js"
+  },
+  "files": [
+    "src/",
+    "cli/",
+    "config/",
+    "scripts/",
+    "resources/",
+    "web/admin-spa/src/",
+    "web/admin-spa/public/",
+    "web/admin-spa/index.html",
+    "web/admin-spa/package.json",
+    "web/admin-spa/package-lock.json",
+    "web/admin-spa/vite.config.js",
+    "web/admin-spa/tailwind.config.js",
+    "web/admin-spa/postcss.config.js",
+    "web/admin-spa/.env.example",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-entrypoint.sh",
+    "Makefile",
+    "README.md",
+    "README_EN.md",
+    "LICENSE",
+    "VERSION",
+    ".env.example"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChatArch/claude-relay-service.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ChatArch/claude-relay-service/issues"
+  },
+  "homepage": "https://github.com/ChatArch/claude-relay-service#readme"
 }
