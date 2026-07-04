@@ -27,6 +27,11 @@ jobs:
       - name: Check release request
         id: check
         run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Auto Release Pipeline must be run from the main branch." >&2
+            exit 1
+          fi
+
           echo "Manual ChatArch release requested"
           echo "needs_bump=true" >> $GITHUB_OUTPUT
 
@@ -468,7 +473,9 @@ jobs:
           MESSAGE+="🔗 *相关链接:*"$'\n'
           MESSAGE+="• [GitHub Release](https://github.com/${REPO}/releases/tag/${TAG})"$'\n'
           MESSAGE+="• [完整更新日志](https://github.com/${REPO}/releases)"$'\n'
-          MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKER_IMAGE%/*}/claude-relay-service) (if configured)"$'\n'
+          if [ -n "$DOCKER_IMAGE" ]; then
+            MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKER_IMAGE%/*}/claude-relay-service)"$'\n'
+          fi
           MESSAGE+="• [GHCR](https://ghcr.io/${GHCR_IMAGE#ghcr.io/})"$'\n'$'\n'
           MESSAGE+="#ClaudeRelay #Update #v${VERSION//./_}"
 
