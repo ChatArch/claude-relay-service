@@ -106,26 +106,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      assetsDir: 'assets',
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            // 将 vue 相关的库打包到一起
-            if (id.includes('node_modules')) {
-              if (id.includes('element-plus')) {
-                return 'element-plus'
-              }
-              if (id.includes('chart.js')) {
-                return 'chart'
-              }
-              if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
-                return 'vue-vendor'
-              }
-              return 'vendor'
-            }
-          }
-        }
-      }
+      assetsDir: 'assets'
     }
   }
 })
