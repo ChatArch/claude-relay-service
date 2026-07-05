@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       checker({
+        // Keep lint diagnostics in the dev server, but do not block packaged production builds.
+        // The npm package install path should be able to run `npm run build:web` without
+        // requiring source-tree lint state to be perfect.
+        enableBuild: false,
         eslint: {
           lintCommand: 'eslint "./src/**/*.{js,vue}" --cache=false',
           dev: {
@@ -102,26 +106,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      assetsDir: 'assets',
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            // 将 vue 相关的库打包到一起
-            if (id.includes('node_modules')) {
-              if (id.includes('element-plus')) {
-                return 'element-plus'
-              }
-              if (id.includes('chart.js')) {
-                return 'chart'
-              }
-              if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
-                return 'vue-vendor'
-              }
-              return 'vendor'
-            }
-          }
-        }
-      }
+      assetsDir: 'assets'
     }
   }
 })
