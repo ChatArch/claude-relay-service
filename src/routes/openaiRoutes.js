@@ -16,6 +16,11 @@ const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const { IncrementalSSEParser } = require('../utils/sseParser')
 const { getSafeMessage } = require('../utils/errorSanitizer')
 const {
+  resolveImageHostModel,
+  buildImageGenerationPayload,
+  extractImageGenerationB64
+} = require('../utils/openaiImages')
+const {
   createRequestDetailMeta,
   extractOpenAICacheReadTokens
 } = require('../utils/requestDetailHelper')
@@ -965,7 +970,6 @@ const handleResponses = async (req, res) => {
   }
 }
 
-// 注册两个路由路径，都使用相同的处理函数
 // OpenAI-compatible images endpoint. Bridges /v1/images/generations to the
 // Codex responses backend via the image_generation tool (gpt-image-*). See #1239.
 async function handleImages(req, res) {
@@ -1009,10 +1013,20 @@ async function handleImages(req, res) {
       })
     }
     const n = body.n || 1
+    const partialImages = body.partial_images === undefined ? 1 : body.partial_images
+    if (!Number.isInteger(partialImages) || partialImages < 0 || partialImages > 3) {
+      return res.status(400).json({
+        error: {
+          message: 'partial_images must be an integer between 0 and 3',
+          type: 'invalid_request_error'
+        }
+      })
+    }
     const sessionId = req.headers['session_id'] || req.body?.session_id || null
     sessionHash = sessionId ? crypto.createHash('sha256').update(sessionId).digest('hex') : null
 
-    const authResult = await getOpenAIAuthToken(apiKeyData, sessionId, 'gpt-5.4-mini')
+    const hostModel = resolveImageHostModel()
+    const authResult = await getOpenAIAuthToken(apiKeyData, sessionId, hostModel)
     const { accessToken, accountType, proxy, account } = authResult
     ;({ accountId } = authResult)
     if (accountType === 'openai-responses' || !accessToken) {
@@ -1024,41 +1038,13 @@ async function handleImages(req, res) {
       })
     }
 
-    const tool = { type: 'image_generation', action: 'generate', model: imageModel }
-    if (body.size) {
-      tool.size = String(body.size)
-    }
-    if (body.quality) {
-      tool.quality = String(body.quality)
-    }
-    if (body.background) {
-      tool.background = String(body.background)
-    }
-    if (body.output_format) {
-      tool.output_format = String(body.output_format)
-    }
-    if (body.moderation) {
-      tool.moderation = String(body.moderation)
-    }
-    if (Number.isInteger(body.output_compression)) {
-      tool.output_compression = body.output_compression
-    }
-    if (n !== 1) {
-      tool.n = n
-    }
-
-    const payload = {
-      instructions: '',
-      stream: true,
-      reasoning: { effort: 'medium', summary: 'auto' },
-      parallel_tool_calls: true,
-      include: ['reasoning.encrypted_content'],
-      model: 'gpt-5.4-mini',
-      store: false,
-      tool_choice: { type: 'image_generation' },
-      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] }],
-      tools: [tool]
-    }
+    const payload = buildImageGenerationPayload({
+      body: { ...body, n },
+      prompt,
+      imageModel,
+      partialImages,
+      hostModel
+    })
 
     const headers = {
       authorization: `Bearer ${accessToken}`,
@@ -1204,10 +1190,11 @@ async function handleImages(req, res) {
         } catch (e) {
           continue
         }
-        if (j && typeof j.partial_image_b64 === 'string') {
+        const imageB64 = extractImageGenerationB64(j)
+        if (imageB64) {
           const i = Number.isInteger(j.partial_image_index) ? j.partial_image_index : 0
-          if (!best[i] || j.partial_image_b64.length >= best[i].length) {
-            best[i] = j.partial_image_b64
+          if (!best[i] || imageB64.length >= best[i].length) {
+            best[i] = imageB64
           }
         }
         if (j && j.type === 'response.completed' && j.response) {
