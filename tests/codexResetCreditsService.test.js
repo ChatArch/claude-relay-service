@@ -189,6 +189,33 @@ describe('Codex live reads', () => {
     expect(h.request).not.toHaveBeenCalled()
   })
 
+  test.each(['1234', '12345', '123456'])(
+    'normalizes provider fractional expiry %s and omits profile metadata',
+    async (fraction) => {
+      const h = makeService()
+      h.request.mockResolvedValue({
+        status: 200,
+        data: {
+          available_count: 1,
+          credits: [
+            {
+              id: 'credit-a',
+              status: 'available',
+              expires_at: `2030-02-01T02:03:04.${fraction}Z`,
+              profile_user_id: 'synthetic-private-profile',
+              profile_image_url: 'https://example.invalid/private-profile'
+            }
+          ]
+        }
+      })
+      const result = await h.service.resetCredits(ACCOUNT)
+      expect(result.credits).toEqual([
+        { id: 'credit-a', status: 'available', expires_at: '2030-02-01T02:03:04.123Z' }
+      ])
+      expect(JSON.stringify(result)).not.toContain('private-profile')
+    }
+  )
+
   test.each(
     ['usage', 'resetCredits', 'consume'].flatMap((operation) =>
       ['missing-subject', 'opaque'].map((kind) => [operation, kind])

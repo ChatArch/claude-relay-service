@@ -128,7 +128,7 @@ function normalizeCredits(body) {
     if (credit.expires_at !== null && credit.expires_at !== undefined) {
       if (
         typeof credit.expires_at !== 'string' ||
-        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(credit.expires_at) ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z$/.test(credit.expires_at) ||
         !Number.isFinite(Date.parse(credit.expires_at))
       ) {
         fail('invalid_upstream_response')
