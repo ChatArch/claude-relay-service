@@ -3,7 +3,10 @@ const {
   createCodexResetCreditsService,
   CodexResetCreditsError
 } = require('../../services/codexResetCreditsService')
-const { createCodexManagementAuth } = require('../../middleware/codexManagementAuth')
+const {
+  createCodexManagementAuth,
+  readCredentials
+} = require('../../middleware/codexManagementAuth')
 
 module.exports = function createCodexResetCreditsRouter(deps = {}) {
   const router = express.Router({ mergeParams: true })
@@ -49,6 +52,15 @@ module.exports = function createCodexResetCreditsRouter(deps = {}) {
   router.get(
     '/reset-credits/operations/:requestId',
     handler((req) => service.operation(req.params.accountId, req.params.requestId))
+  )
+  router.post(
+    '/reset-credits/operations/:requestId/reconcile',
+    handler((req) => {
+      if (req.headers['x-api-key'] !== undefined || readCredentials(req).management) {
+        throw new CodexResetCreditsError('admin_required', 403)
+      }
+      return service.reconcile(req.params.accountId, req.params.requestId, req.body)
+    }, true)
   )
   return router
 }

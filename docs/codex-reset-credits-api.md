@@ -12,6 +12,7 @@
 | GET | `/reset-credits` | 实时获取可用重置卡数和必要详情，不消费 |
 | POST | `/reset-credits/consume` | 显式消费、持久幂等、前后状态验证 |
 | GET | `/reset-credits/operations/{requestId}` | 查询已有回执，不重新请求上游或续期 OAuth |
+| POST | `/reset-credits/operations/{requestId}/reconcile` | 仅Admin显式确认延迟结果；只读上游，不再次消费 |
 
 成功读取返回 `success: true` 和 `data`。其中 `account_id` 为请求的 CRS ID，`checked_at` 为本次读取时间，`source` 为 `upstream`。额度的 `rate_limit` 保留真实 `primary_window`、`secondary_window`；窗口可为空，使用 `limit_window_seconds` 区分类型，不固定 primary=5小时。卡片只输出 `available_count` 及必要的 `id/status/expires_at`。
 
@@ -49,13 +50,23 @@
 
 只有确认重置且新鲜额度可用，才按原值比较清除相关限流字段。若暂停由自动限流明确拥有（`rateLimitOwnsSchedulable`），账号仍处于启用/有效状态，才恢复调度；人工状态修改会取消该归属。不会恢复手工停用的 `isActive/schedulable`，不会清除无关认证异常，也不会调用宽泛的 `reset-status` 冒充上游重置。没有归属信息的旧暂停记录保持原调度设置，需管理员核对，而非猜测暂停原因。
 
+## 上游延迟与人工确认
+
+消费确认可能早于额度窗口更新。收到已知reset结果后，服务最多进行6轮GET后验检查，间隔2秒；不会重放消费POST。仍不能证实时保留uncertain屏障。
+
+管理员核对后可POST同一request ID的`reconcile`，正文必须为`{"execute":true,"confirm_request_id":"<same-request-id>"}`。管理Key和模型Key不能调用此操作。它只进行新鲜GET并以比较交换更新回执/解除对应操作屏障，不再次用卡、不恢复调度暂停。
+
+确认要求原回执已有正的窗口重置数及前后快照，操作不超过1小时，当前卡片ID集合恰少一张且该卡未自然过期，匹配额度窗口在原自然重置时间前确实下降。新记录还核对锁owner与上游身份摘要；旧记录缺少这些信息时，只有有界核对到整个原生操作空间恰有本条未决回执及对应锁才允许继续，否则409。并发修改锁或回执会使CAS失败，不能借此清除别人的操作。
+
+完成回执的重复确认只返回既有结果，不访问上游。不能确认的证据仍保持uncertain；调用者的本地未决台账只能在读回该固定回执确认为reset_verified后按原request ID同步，不能删除或换ID绕过。
+
 ## 失败与恢复边界
 
 - 参数错误400，权限不足401/403，资源不存在404，账号锁定/幂等冲突409，上游或存储失败502/504。
 - 响应使用固定安全错误码，不透传Token、Cookie、上游原始正文或内部异常。
 - 数据与回执响应设置 `Cache-Control: no-store`。
 - pending/uncertain屏障不会靠TTL自动消失。发生不明确结果后先查询回执并人工核对，不能以新request ID、另一账号别名或清空台账绕过。
-- 当前没有自动解除未决操作的管理接口。Redis需按CRS既有持久化/备份策略运行；测试fixture不能代替持久化部署。
+- 未决操作不会自动解除；只有上述有证据的Admin确认可完成延迟结果。Redis需按CRS既有持久化/备份策略运行；测试fixture不能代替持久化部署。
 - 该API不是重置策略调度器。Glance等客户端保留显式账号开关、阈值和预测保护；读操作不会隐式用卡。
 
 ## 验证

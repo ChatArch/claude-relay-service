@@ -15,6 +15,11 @@ function setup(keysService) {
       request_id: body.request_id,
       status: 'uncertain'
     })),
+    reconcile: jest.fn(async (accountId, requestId) => ({
+      account_id: accountId,
+      request_id: requestId,
+      status: 'reset_verified'
+    })),
     operation: jest.fn(async (accountId, requestId) => ({
       account_id: accountId,
       request_id: requestId,
@@ -37,6 +42,27 @@ function setup(keysService) {
 const prefix = '/admin/openai-accounts/synthetic-account/codex'
 
 describe('Codex admin child router', () => {
+  test('reconciliation is explicit Admin-only and does not call consume', async () => {
+    const keys = { authorize: jest.fn(async () => ({ id: 'key-id' })) }
+    const h = setup(keys)
+    const url = `${prefix}/reset-credits/operations/req-1/reconcile`
+    const body = { execute: true, confirm_request_id: 'req-1' }
+    expect(
+      (
+        await request(h.app)
+          .post(url)
+          .set('x-api-key', `crsm_${'A'.repeat(43)}`)
+          .send(body)
+      ).status
+    ).toBe(403)
+    expect(h.service.reconcile).not.toHaveBeenCalled()
+    expect(
+      (await request(h.app).post(url).set('Authorization', 'Bearer synthetic-admin').send(body))
+        .status
+    ).toBe(200)
+    expect(h.service.reconcile).toHaveBeenCalledWith('synthetic-account', 'req-1', body)
+    expect(h.service.consume).not.toHaveBeenCalled()
+  })
   test('native endpoint accepts a scoped management key without Admin fallback', async () => {
     const keys = { authorize: jest.fn(async () => ({ id: 'key-id' })) }
     const h = setup(keys)

@@ -60,6 +60,7 @@ function makeService(overrides = {}) {
     request,
     proxyHelper,
     redis,
+    delay: jest.fn(async () => {}),
     now: () => new Date(NOW),
     ...overrides
   }
@@ -364,6 +365,163 @@ function consumeHarness() {
 }
 
 describe('Codex exactly-once consumption receipts', () => {
+  test('delayed quota visibility is polled read-only without replaying consumption', async () => {
+    const h = consumeHarness()
+    let posted = false
+    h.request.mockImplementation(async (o) => {
+      if (o.method === 'POST') {
+        posted = true
+        return { status: 200, data: { code: 'reset', windows_reset: 1 } }
+      }
+      return {
+        status: 200,
+        data: o.url.endsWith('/usage')
+          ? usage(posted && h.delay.mock.calls.length >= 2 ? 0 : 80)
+          : credits(posted ? 0 : 1)
+      }
+    })
+    const result = await h.service.consume(ACCOUNT, payload)
+    expect(result.status).toBe('reset_verified')
+    expect(h.delay).toHaveBeenCalledTimes(2)
+    expect(h.request.mock.calls.filter(([o]) => o.method === 'POST')).toHaveLength(1)
+  })
+
+  test.each([false, true])(
+    'explicit reconciliation proves delayed reset; legacy=%s',
+    async (legacy) => {
+      const h = consumeHarness()
+      let posted = false
+      let visible = false
+      h.request.mockImplementation(async (o) => {
+        if (o.method === 'POST') {
+          posted = true
+          return { status: 200, data: { code: 'reset', windows_reset: 1 } }
+        }
+        return {
+          status: 200,
+          data: o.url.endsWith('/usage') ? usage(visible ? 0 : 80) : credits(posted ? 0 : 1)
+        }
+      })
+      expect((await h.service.consume(ACCOUNT, payload)).status).toBe('uncertain')
+      if (legacy) {
+        for (const [key, value] of h.redis.values) {
+          if (!key.includes(':request:')) {
+            continue
+          }
+          const record = JSON.parse(value)
+          delete record.owner
+          delete record.upstream_hash
+          h.redis.values.set(key, JSON.stringify(record))
+        }
+      }
+      visible = true
+      h.request.mockClear()
+      const result = await h.service.reconcile(ACCOUNT, payload.request_id, {
+        execute: true,
+        confirm_request_id: payload.request_id
+      })
+      expect(result).toMatchObject({
+        status: 'reset_verified',
+        code: 'reset',
+        windows_reset: 1,
+        scheduling_updated: false
+      })
+      expect(h.request.mock.calls.every(([o]) => o.method === 'GET')).toBe(true)
+      expect([...h.redis.values.keys()].some((key) => key.endsWith(':lock'))).toBe(false)
+      expect(await h.service.operation(ACCOUNT, payload.request_id)).toEqual(result)
+      h.request.mockClear()
+      expect(
+        await h.service.reconcile(ACCOUNT, payload.request_id, {
+          execute: true,
+          confirm_request_id: payload.request_id
+        })
+      ).toEqual(result)
+      expect(h.request).not.toHaveBeenCalled()
+    }
+  )
+
+  test.each([
+    'no-debit',
+    'expired-credit',
+    'natural-reset',
+    'owner-changed',
+    'receipt-raced',
+    'legacy-ambiguous',
+    'identity-changed',
+    'no-acknowledgement'
+  ])('reconciliation retains barriers for %s', async (scenario) => {
+    const h = consumeHarness()
+    let posted = false
+    let visible = false
+    h.request.mockImplementation(async (o) => {
+      if (o.method === 'POST') {
+        posted = true
+        return { status: 200, data: { code: 'reset', windows_reset: 1 } }
+      }
+      const bank = credits(posted && !(visible && scenario === 'no-debit') ? 0 : 1)
+      if (scenario === 'expired-credit' && bank.credits.length) {
+        bank.credits[0].expires_at = '2025-01-01T00:00:00Z'
+      }
+      return { status: 200, data: o.url.endsWith('/usage') ? usage(visible ? 0 : 80) : bank }
+    })
+    expect((await h.service.consume(ACCOUNT, payload)).status).toBe('uncertain')
+    const key = [...h.redis.values.keys()].find((candidate) => candidate.includes(':request:'))
+    const lock = [...h.redis.values.keys()].find((candidate) => candidate.endsWith(':lock'))
+    const record = JSON.parse(h.redis.values.get(key))
+    if (scenario === 'natural-reset') {
+      for (const value of Object.values(record.receipt.before.usage.rate_limit)) {
+        value.reset_at = Date.parse(NOW) / 1000 - 1
+      }
+    }
+    if (scenario === 'no-acknowledgement') {
+      record.receipt.windows_reset = 0
+    }
+    if (scenario === 'identity-changed') {
+      record.upstream_hash = '0'.repeat(64)
+    }
+    if (scenario === 'owner-changed') {
+      h.redis.values.set(lock, 'another-owner')
+    }
+    if (scenario === 'legacy-ambiguous') {
+      delete record.owner
+      delete record.upstream_hash
+      h.redis.values.set('openai:codex-reset:upstream:other:lock', 'another-owner')
+    }
+    h.redis.values.set(key, JSON.stringify(record))
+    if (scenario === 'receipt-raced') {
+      const original = h.redis.eval.bind(h.redis)
+      h.redis.eval = async (script, ...args) => {
+        if (script.includes('-- codex-reconcile')) {
+          h.redis.values.set(key, JSON.stringify({ ...record, concurrent_marker: true }))
+        }
+        return original(script, ...args)
+      }
+    }
+    visible = true
+    h.request.mockClear()
+    const promise = h.service.reconcile(ACCOUNT, payload.request_id, {
+      execute: true,
+      confirm_request_id: payload.request_id
+    })
+    if (['no-debit', 'expired-credit', 'natural-reset'].includes(scenario)) {
+      expect((await promise).status).toBe('uncertain')
+    } else {
+      await expect(promise).rejects.toMatchObject({ statusCode: 409 })
+    }
+    expect(h.redis.values.has(lock)).toBe(true)
+    expect((await h.service.operation(ACCOUNT, payload.request_id)).status).toBe('uncertain')
+    expect(h.request.mock.calls.every(([o]) => o.method === 'GET')).toBe(true)
+  })
+
+  test('reconciliation confirmation is mandatory before any I/O', async () => {
+    const h = consumeHarness()
+    await expect(
+      h.service.reconcile(ACCOUNT, 'req-1', { execute: true, confirm_request_id: 'req-other' })
+    ).rejects.toMatchObject({ code: 'execution_required' })
+    expect(h.redis.calls).toEqual([])
+    expect(h.request).not.toHaveBeenCalled()
+  })
+
   test.each([undefined, {}, { execute: false }, { execute: 'true' }, { execute: 1 }])(
     'execute guard precedes every side effect for %s',
     async (body) => {

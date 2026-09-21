@@ -11,6 +11,10 @@ function createFakeRedis(accountId = 'synthetic-account', account = {}) {
       calls.push(['get', key])
       return values.get(key) || null
     },
+    async scan() {
+      calls.push(['scan'])
+      return ['0', [...values.keys()].filter((key) => key.startsWith('openai:codex-reset:'))]
+    },
     async eval(script, count, ...args) {
       calls.push(['eval', script, count, ...args])
       const keys = args.slice(0, count)
@@ -34,6 +38,14 @@ function createFakeRedis(accountId = 'synthetic-account', account = {}) {
         if (argv[2] === 'release') {
           values.delete(keys[0])
         }
+        return 1
+      }
+      if (script.includes('-- codex-reconcile')) {
+        if (values.get(keys[0]) !== argv[0] || values.get(keys[1]) !== argv[1]) {
+          return 0
+        }
+        values.set(keys[1], argv[2])
+        values.delete(keys[0])
         return 1
       }
       if (script.includes('-- codex-sync')) {

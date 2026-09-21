@@ -18,6 +18,12 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[2], ARGV[2])
 if ARGV[3] == 'release' then redis.call('DEL', KEYS[1]) end
 return 1`
+const RECONCILE = `-- codex-reconcile
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[2], ARGV[3])
+redis.call('DEL', KEYS[1])
+return 1`
 const SYNC_RATE_LIMIT = `-- codex-sync
 if redis.call('HGET', KEYS[1], 'accountId') ~= ARGV[1] then return 0 end
 if redis.call('HGET', KEYS[1], 'rateLimitStatus') ~= 'limited' then return 0 end
@@ -149,6 +155,7 @@ function createCodexResetCreditsService(deps = {}) {
   const proxyHelper = deps.proxyHelper || require('../utils/proxyHelper')
   const request = deps.request || require('axios').create().request
   const now = deps.now || (() => new Date())
+  const delay = deps.delay || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
   const redis = () => deps.redis || require('../models/redis').getClientSafe()
 
   function tokenState(current, context) {
@@ -346,6 +353,24 @@ function createCodexResetCreditsService(deps = {}) {
     )
   }
 
+  function quotaDecreased(before, after, beforeNaturalReset = false) {
+    return WINDOW_NAMES.some((name) => {
+      const original = before.rate_limit[name]
+      return (
+        original &&
+        (!beforeNaturalReset || original.reset_at > now().getTime() / 1000) &&
+        WINDOW_NAMES.some((next) => {
+          const current = after.rate_limit[next]
+          return (
+            current &&
+            current.limit_window_seconds === original.limit_window_seconds &&
+            current.used_percent < original.used_percent
+          )
+        })
+      )
+    })
+  }
+
   function receiptSnapshot(value, kind, accountId) {
     if (value === null) {
       return null
@@ -397,11 +422,17 @@ function createCodexResetCreditsService(deps = {}) {
         r.request_id !== requestId ||
         !STATES.has(r.status) ||
         !CODES.has(r.code) ||
+        (record.owner !== undefined &&
+          (!identifier(record.owner) || !/^[a-f0-9]{64}$/.test(record.upstream_hash || ''))) ||
+        (record.owner === undefined && record.upstream_hash !== undefined) ||
         (record.credit_id !== null && !identifier(record.credit_id))
       ) {
         throw new Error()
       }
       return {
+        serialized: text,
+        owner: record.owner || null,
+        upstream_hash: record.upstream_hash || null,
         credit_id: record.credit_id,
         receipt: {
           account_id: accountId,
@@ -429,6 +460,131 @@ function createCodexResetCreditsService(deps = {}) {
       fail('operation_not_found', 404)
     }
     return value.receipt
+  }
+
+  async function soleLegacyPending(key, serialized, lock, owner) {
+    let cursor = '0'
+    const seen = new Set()
+    let receipts = 0
+    let locks = 0
+    for (let page = 0; page < 50; page++) {
+      const result = await redis().scan(cursor, 'MATCH', 'openai:codex-reset:*', 'COUNT', 100)
+      cursor = result[0]
+      for (const candidate of result[1]) {
+        if (seen.has(candidate)) {
+          continue
+        }
+        seen.add(candidate)
+        if (seen.size > 200) {
+          fail('reconciliation_conflict', 409)
+        }
+        const value = await redis().get(candidate)
+        if (candidate.endsWith(':lock')) {
+          if (candidate !== lock || value !== owner) {
+            fail('reconciliation_conflict', 409)
+          }
+          locks++
+        } else if (candidate.includes(':request:')) {
+          if (typeof value !== 'string' || value.length > 4194304) {
+            fail('reconciliation_conflict', 409)
+          }
+          const row = JSON.parse(value)
+          if (row.receipt && row.receipt.status === 'uncertain') {
+            if (candidate !== key || value !== serialized) {
+              fail('reconciliation_conflict', 409)
+            }
+            receipts++
+          }
+        }
+      }
+      if (cursor === '0') {
+        if (receipts !== 1 || locks !== 1) {
+          fail('reconciliation_conflict', 409)
+        }
+        return
+      }
+    }
+    fail('reconciliation_conflict', 409)
+  }
+
+  async function reconcile(accountId, requestId, body) {
+    if (!identifier(accountId) || !identifier(requestId)) {
+      fail('invalid_request', 400)
+    }
+    if (!body || body.execute !== true || body.confirm_request_id !== requestId) {
+      fail('execution_required', 400)
+    }
+    const record = await stored(accountId, requestId)
+    if (!record) {
+      fail('operation_not_found', 404)
+    }
+    const { receipt } = record
+    if (receipt.status !== 'uncertain') {
+      return receipt
+    }
+    if (
+      !receipt.before ||
+      !receipt.before.usage ||
+      !receipt.before.credits ||
+      !receipt.after ||
+      !receipt.after.usage ||
+      !receipt.after.credits ||
+      receipt.windows_reset < 1
+    ) {
+      fail('reconciliation_unproven', 409)
+    }
+    const age = now().getTime() - Date.parse(receipt.before.usage.checked_at)
+    if (age < 0 || age > 3600000) {
+      fail('reconciliation_unproven', 409)
+    }
+    const context = await contextFor(accountId)
+    const lock = `openai:codex-reset:upstream:${hash(context.identity)}:lock`
+    const key = receiptKey(accountId, requestId)
+    const owner = record.owner || (await redis().get(lock))
+    if (
+      !identifier(owner) ||
+      (await redis().get(lock)) !== owner ||
+      (record.owner && record.upstream_hash !== hash(context.identity))
+    ) {
+      fail('reconciliation_conflict', 409)
+    }
+    if (!record.owner) {
+      await soleLegacyPending(key, record.serialized, lock, owner)
+    }
+    const freshUsage = await readUsage(context)
+    const freshCredits = await readCredits(context)
+    const beforeAvailable = receipt.before.credits.credits.filter(
+      (row) => row.status === 'available'
+    )
+    const afterIds = new Set(
+      freshCredits.credits.filter((row) => row.status === 'available').map((row) => row.id)
+    )
+    const missing = beforeAvailable.filter((row) => !afterIds.has(row.id))
+    const validDebit =
+      freshCredits.available_count === receipt.before.credits.available_count - 1 &&
+      missing.length === 1 &&
+      [...afterIds].every((id) => beforeAvailable.some((row) => row.id === id)) &&
+      (missing[0].expires_at === null || Date.parse(missing[0].expires_at) > now().getTime())
+    if (!validDebit || !quotaDecreased(receipt.before.usage, freshUsage.value, true)) {
+      return receipt
+    }
+    tokenState(await account(accountId, context), context)
+    receipt.after = { usage: freshUsage.value, credits: freshCredits }
+    receipt.status = 'reset_verified'
+    receipt.code = 'reset'
+    receipt.cache_updated = freshUsage.cacheUpdated
+    // Operator reconciliation never reverses an administrator/legacy scheduler pause.
+    receipt.scheduling_updated = false
+    const encoded = JSON.stringify({
+      credit_id: record.credit_id,
+      owner,
+      upstream_hash: hash(context.identity),
+      receipt
+    })
+    if ((await redis().eval(RECONCILE, 2, lock, key, owner, record.serialized, encoded)) !== 1) {
+      fail('reconciliation_conflict', 409)
+    }
+    return receipt
   }
 
   async function consume(accountId, body) {
@@ -469,7 +625,8 @@ function createCodexResetCreditsService(deps = {}) {
       cache_updated: false,
       scheduling_updated: false
     }
-    const encode = () => JSON.stringify({ credit_id: creditId, receipt })
+    const encode = () =>
+      JSON.stringify({ credit_id: creditId, owner, upstream_hash: hash(context.identity), receipt })
     let reserved
     try {
       reserved = await redis().eval(RESERVE, 2, lock, key, owner, encode())
@@ -555,9 +712,6 @@ function createCodexResetCreditsService(deps = {}) {
     }
 
     try {
-      const afterUsage = await readUsage(context)
-      receipt.after = { usage: afterUsage.value, credits: await readCredits(context) }
-      receipt.cache_updated = afterUsage.cacheUpdated
       const code =
         result && ['reset', 'nothing_to_reset', 'no_credit'].includes(result.code)
           ? result.code
@@ -571,6 +725,26 @@ function createCodexResetCreditsService(deps = {}) {
           : 0
       receipt.code = code
       receipt.windows_reset = count
+      // Quota projections can lag the acknowledgement. Retry only GET proof.
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const afterUsage = await readUsage(context)
+        receipt.after = { usage: afterUsage.value, credits: await readCredits(context) }
+        receipt.cache_updated = afterUsage.cacheUpdated
+        const difference =
+          receipt.before.credits.available_count - receipt.after.credits.available_count
+        const verified =
+          difference === 1 && quotaDecreased(receipt.before.usage, receipt.after.usage)
+        if (
+          code !== 'reset' ||
+          count === 0 ||
+          verified ||
+          ![0, 1].includes(difference) ||
+          attempt === 5
+        ) {
+          break
+        }
+        await delay(2000)
+      }
       const beforeWindows = Object.values(receipt.before.usage.rate_limit).filter(
         (value) => value && typeof value === 'object'
       )
@@ -656,6 +830,7 @@ function createCodexResetCreditsService(deps = {}) {
     usage: safe(async (accountId) => (await readUsage(await contextFor(accountId))).value),
     resetCredits: safe(async (accountId) => readCredits(await contextFor(accountId))),
     consume: safe(consume),
+    reconcile: safe(reconcile),
     operation: safe(operation)
   }
 }
