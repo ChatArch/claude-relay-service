@@ -7689,12 +7689,15 @@
     "cache_creation_input_token_cost": 2.5e-05,
     "cache_creation_input_token_cost_above_12hr": 5e-05,
     "cache_read_input_token_cost": 2e-06,
+    "cache_read_input_token_cost_above_272k_tokens": 4e-06,
     "input_cost_per_token": 2e-05,
+    "input_cost_per_token_above_272k_tokens": 4e-05,
     "litellm_provider": "openai",
     "max_input_tokens": 922000,
     "max_output_tokens": 128000,
     "mode": "chat",
     "output_cost_per_token": 0.0001,
+    "output_cost_per_token_above_272k_tokens": 0.00015,
     "source": "https://developers.openai.com/api/docs/models/gpt-6-cyber",
     "supported_endpoints": [
       "/v1/chat/completions",
@@ -8550,6 +8553,8 @@
     "cache_read_input_image_token_cost": 2e-06,
     "cache_read_input_token_cost": 1.25e-06,
     "cache_read_input_token_cost_batches": 6.25e-07,
+    "deprecation_date": "2027-02-10",
+    "deprecation_source": "https://developers.openai.com/api/docs/deprecations",
     "input_cost_per_image_token": 8e-06,
     "input_cost_per_image_token_batches": 4e-06,
     "input_cost_per_token": 5e-06,
@@ -8559,6 +8564,7 @@
     "output_cost_per_image_token": 3e-05,
     "output_cost_per_image_token_batches": 1.5e-05,
     "source": "https://developers.openai.com/api/docs/pricing",
+    "successor_model": "gpt-image-2.6-sunburst",
     "supported_endpoints": [
       "/v1/images/generations",
       "/v1/images/edits"
@@ -8569,12 +8575,15 @@
   "gpt-image-2-2026-04-21": {
     "cache_read_input_image_token_cost": 2e-06,
     "cache_read_input_token_cost": 1.25e-06,
+    "deprecation_date": "2027-02-10",
+    "deprecation_source": "https://developers.openai.com/api/docs/deprecations",
     "input_cost_per_image_token": 8e-06,
     "input_cost_per_token": 5e-06,
     "litellm_provider": "openai",
     "mode": "image_generation",
     "output_cost_per_image_token": 3e-05,
     "source": "https://developers.openai.com/api/docs/pricing",
+    "successor_model": "gpt-image-2.6-sunburst",
     "supported_endpoints": [
       "/v1/images/generations",
       "/v1/images/edits"
