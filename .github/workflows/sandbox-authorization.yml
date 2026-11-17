@@ -10,6 +10,7 @@ on:
       - src/app.js
       - src/middleware/auth.js
       - src/middleware/authLogPolicy.js
+      - src/middleware/browserFallback.js
       - src/models/redis.js
       - tests/sandboxAuthorization*.test.js
       - tests/sensitiveAuthLogging.test.js
@@ -23,6 +24,7 @@ on:
       - src/routes/admin/sandboxGrants.js
       - src/middleware/auth.js
       - src/middleware/authLogPolicy.js
+      - src/middleware/browserFallback.js
       - tests/sandboxAuthorization*.test.js
       - tests/sensitiveAuthLogging.test.js
       - .github/workflows/sandbox-authorization.yml
@@ -44,6 +46,6 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check changed authorization sources
-        run: npx eslint src/services/sandboxAuthorizationService.js src/routes/sandboxAuthorization.js src/routes/admin/sandboxGrants.js src/middleware/auth.js src/middleware/authLogPolicy.js src/app.js src/routes/admin/index.js
+        run: npx eslint src/services/sandboxAuthorizationService.js src/routes/sandboxAuthorization.js src/routes/admin/sandboxGrants.js src/middleware/auth.js src/middleware/authLogPolicy.js src/middleware/browserFallback.js src/app.js src/routes/admin/index.js
       - name: Verify isolated authorization and existing management contracts
         run: npm test -- --runInBand tests/sandboxAuthorization.test.js tests/sandboxAuthorizationRoutes.test.js tests/sensitiveAuthLogging.test.js tests/codexManagementAuth.test.js tests/codexManagementKeys.test.js

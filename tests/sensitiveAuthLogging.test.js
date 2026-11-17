@@ -10,6 +10,7 @@ jest.mock('../src/services/claudeRelayConfigService', () => ({}))
 jest.mock('../src/utils/statsHelper', () => ({}))
 jest.mock('../src/utils/modelHelper', () => ({}))
 jest.mock('../src/utils/logger', () => ({
+  api: jest.fn(),
   debug: jest.fn(),
   info: jest.fn(),
   warn: jest.fn(),
@@ -20,6 +21,7 @@ const express = require('express')
 const request = require('supertest')
 const logger = require('../src/utils/logger')
 const { requestLogger, errorHandler } = require('../src/middleware/auth')
+const { browserFallbackMiddleware } = require('../src/middleware/browserFallback')
 const { skipSensitiveAuthLogging } = require('../src/middleware/authLogPolicy')
 const SECRET = 'synthetic-credential-never-log'
 
@@ -40,6 +42,7 @@ describe('sensitive authentication HTTP logging', () => {
     app = express()
     // Test pre-parsed bodies as well as the production order, which parses later.
     app.use(express.json())
+    app.use(browserFallbackMiddleware)
     app.use(requestLogger)
     app.use(skipSensitiveAuthLogging(debug))
     app.all('*', (req, res) => {
@@ -64,18 +67,19 @@ describe('sensitive authentication HTTP logging', () => {
     async (path) => {
       const response = await request(app)
         .post(`${path}?password=${SECRET}`)
-        .set('Authorization', `Bearer ${SECRET}`)
+        .set('Authorization', `Bearer cr_${SECRET}`)
         .set('Cookie', `adminToken=${SECRET}`)
         .set('x-api-key', SECRET)
         .set('Referer', `https://synthetic.example/?token=${SECRET}`)
         .set('User-Agent', SECRET)
+        .set('Origin', `chrome-extension://${SECRET}`)
         .send({ username: 'synthetic', password: SECRET })
       expect(response.status).toBe(200)
       expect(response.body).toEqual({ success: true, token: SECRET })
       expect(debug).not.toHaveBeenCalled()
       expect(debugRecords).toEqual([])
       expect(logger.info).toHaveBeenCalled()
-      for (const method of ['debug', 'info', 'warn', 'error']) {
+      for (const method of ['api', 'debug', 'info', 'warn', 'error']) {
         const recorded = JSON.stringify(logger[method].mock.calls)
         expect(recorded).not.toContain(SECRET)
         expect(recorded).not.toContain('password=')
