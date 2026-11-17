@@ -47,7 +47,9 @@ function fakeRedis() {
     grants,
     hget: jest.fn(async (_map, digest) => indexes.get(digest) || null),
     hgetall: jest.fn(async (key) => {
-      if (key.startsWith('apikey_hash:')) return legacy.get(key.slice(12)) || {}
+      if (key.startsWith('apikey_hash:')) {
+        return legacy.get(key.slice(12)) || {}
+      }
       return keys.get(key.slice(7)) || {}
     }),
     get: jest.fn(async (key) => grants.get(key) || null),
@@ -137,7 +139,7 @@ describe('independent Sandbox authorization', () => {
     expect(redis.del).not.toHaveBeenCalled()
   })
 
-  test.each([null, '', 'not-a-key', 'crsm_' + 'A'.repeat(43), KEY + '\n', 'cr_' + 'x'.repeat(513)])(
+  test.each([null, '', 'not-a-key', `crsm_${'A'.repeat(43)}`, `${KEY}\n`, `cr_${'x'.repeat(513)}`])(
     'rejects invalid Key without storage: %p',
     async (key) => {
       await expect(service.verify(key)).rejects.toMatchObject({ status: 401 })
@@ -185,7 +187,7 @@ describe('independent Sandbox authorization', () => {
       message: 'sandbox_authorization_unavailable'
     })
     getUser.mockResolvedValue({ isActive: true })
-    redis.grants.set('sandbox:grant:' + KEY_ID, 'corrupt ' + KEY)
+    redis.grants.set(`sandbox:grant:${KEY_ID}`, `corrupt ${KEY}`)
     await expect(service.verify(KEY)).rejects.toMatchObject({ status: 503 })
     await expect(service.status(KEY_ID, 'a'.repeat(64))).rejects.toMatchObject({ status: 503 })
     redis.get.mockRejectedValue(new Error(KEY))
@@ -219,7 +221,7 @@ describe('independent Sandbox authorization', () => {
       schema_version: 1,
       active: true
     })
-    const nextKey = 'cr_' + '2'.repeat(64)
+    const nextKey = `cr_${'2'.repeat(64)}`
     redis.indexes.delete(hash(KEY))
     redis.indexes.set(hash(nextKey), KEY_ID)
     redis.keys.get(KEY_ID).apiKey = hash(nextKey)

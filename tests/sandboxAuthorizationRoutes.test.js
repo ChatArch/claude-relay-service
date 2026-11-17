@@ -8,7 +8,7 @@ const {
 const { createSandboxGrantsRouter } = require('../src/routes/admin/sandboxGrants')
 const { SandboxAuthorizationError } = require('../src/services/sandboxAuthorizationService')
 
-const key = 'cr_' + 'a'.repeat(64)
+const key = `cr_${'a'.repeat(64)}`
 const version = 'b'.repeat(64)
 describe('Sandbox verification and grant HTTP contracts', () => {
   let app, service, admin
@@ -43,7 +43,7 @@ describe('Sandbox verification and grant HTTP contracts', () => {
     async (name) => {
       const response = await request(app)
         .post('/auth/sandbox/verify')
-        .set(name, name === 'Authorization' ? 'Bearer ' + key : key)
+        .set(name, name === 'Authorization' ? `Bearer ${key}` : key)
         .send({})
       expect(response.status).toBe(200)
       expect(response.headers['cache-control']).toBe('no-store')
@@ -58,14 +58,14 @@ describe('Sandbox verification and grant HTTP contracts', () => {
       (
         await request(app)
           .post('/auth/sandbox/verify')
-          .set('Authorization', 'Bearer ' + key)
+          .set('Authorization', `Bearer ${key}`)
           .set('x-api-key', key)
           .send({})
       ).status
     ).toBe(200)
     for (const headers of [
-      { Authorization: 'Bearer ' + key, 'x-api-key': 'different' },
-      { Authorization: 'Basic ' + key },
+      { Authorization: `Bearer ${key}`, 'x-api-key': 'different' },
+      { Authorization: `Basic ${key}` },
       { Cookie: 'adminToken=anything' },
       { 'x-admin-token': 'anything' },
       { 'X-Forwarded-User': 'owner' }
@@ -80,7 +80,7 @@ describe('Sandbox verification and grant HTTP contracts', () => {
     for (const header of ['authorization', 'x-api-key']) {
       expect(() =>
         readSandboxKey({
-          headers: { authorization: 'Bearer ' + key },
+          headers: { authorization: `Bearer ${key}` },
           rawHeaders: [header, key, header.toUpperCase(), key]
         })
       ).toThrow(SandboxAuthorizationError)
@@ -88,18 +88,14 @@ describe('Sandbox verification and grant HTTP contracts', () => {
   })
 
   test('rejects query credentials and caller/identity claims in body', async () => {
-    expect(
-      (
-        await request(app)
-          .post('/auth/sandbox/verify?api_key=' + key)
-          .send({})
-      ).status
-    ).toBe(400)
+    expect((await request(app).post(`/auth/sandbox/verify?api_key=${key}`).send({})).status).toBe(
+      400
+    )
     expect(
       (
         await request(app)
           .post('/auth/sandbox/verify')
-          .set('Authorization', 'Bearer ' + key)
+          .set('Authorization', `Bearer ${key}`)
           .send({ caller_id: 'victim' })
       ).status
     ).toBe(400)
@@ -138,7 +134,7 @@ describe('Sandbox verification and grant HTTP contracts', () => {
       service.verify.mockRejectedValue(new SandboxAuthorizationError(codes[status]))
       const response = await request(app)
         .post('/auth/sandbox/verify')
-        .set('Authorization', 'Bearer ' + key)
+        .set('Authorization', `Bearer ${key}`)
         .send({})
       expect(response.status).toBe(status)
       expect(response.body).toEqual({ active: false, error: codes[status] })
@@ -168,8 +164,8 @@ describe('Sandbox verification and grant HTTP contracts', () => {
   test.each([
     {},
     { Cookie: 'adminToken=session' },
-    { Authorization: 'Bearer ' + key },
-    { Authorization: 'Bearer crsm_' + 'A'.repeat(43) },
+    { Authorization: `Bearer ${key}` },
+    { Authorization: `Bearer crsm_${'A'.repeat(43)}` },
     { 'x-api-key': key },
     { 'x-admin-token': 'session' }
   ])('grant edit refuses alternate identities %p without fallback', async (headers) => {
@@ -218,7 +214,7 @@ describe('Sandbox verification and grant HTTP contracts', () => {
     const malformed = await request(app)
       .post('/auth/sandbox/status')
       .set('Content-Type', 'application/json')
-      .send('{"key":"' + key)
+      .send(`{"key":"${key}`)
     expect(malformed.status).toBe(400)
     const text = await request(app)
       .post('/auth/sandbox/verify')
