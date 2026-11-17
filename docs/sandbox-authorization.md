@@ -83,6 +83,8 @@ This status route is deliberately not standalone authorization. A gateway must f
 
 Both public routes have a 2 KiB JSON body limit, no-store responses, and a bounded per-process limiter (600 requests/minute/IP; at most1024 active IP buckets). This is an abuse guard, not distributed quota accounting. Deploy behind the existing trusted HTTPS ingress and keep any upstream debug request interception away from credential endpoints. The routes are mounted before the general model body/debug pipeline. Do not cache successful status indefinitely; this implementation performs fresh reads and creates no revocation propagation delay of its own.
 
+Server request logging omits request/response bodies, query strings, credential identity metadata and header-derived User-Agent/Referer values for `/web/auth/*` and `/auth/sandbox/*`. Responses and authentication behavior are unchanged. These prefixes also bypass the HTTP debug interceptor when `DEBUG_HTTP_TRAFFIC=true`, including unknown child routes. Keep this policy when adding another interceptor; ordinary model route logging remains unchanged. Do not use real login credentials for log validation: synthetic tests cover both request logging and an enabled debug interceptor.
+
 ## Verification and rollout
 
 ```bash

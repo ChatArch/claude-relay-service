@@ -29,6 +29,7 @@ const userRoutes = require('./routes/userRoutes')
 const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
 const { createSandboxVerificationRouter } = require('./routes/sandboxAuthorization')
+const { skipSensitiveAuthLogging } = require('./middleware/authLogPolicy')
 
 // Import middleware
 const {
@@ -227,7 +228,7 @@ class Application {
       if (process.env.DEBUG_HTTP_TRAFFIC === 'true') {
         try {
           const { debugInterceptor } = require('./middleware/debugInterceptor')
-          this.app.use(debugInterceptor)
+          this.app.use(skipSensitiveAuthLogging(debugInterceptor))
           logger.info('🐛 HTTP调试拦截器已启用 - 日志输出到 logs/http-debug-*.log')
         } catch (error) {
           logger.warn('⚠️ 无法加载HTTP调试拦截器:', error.message)
