@@ -75,10 +75,34 @@ describe('independent Sandbox authorization', () => {
       redis.keys.get(KEY_ID).permissions = permissions
       await expect(service.verify(KEY)).rejects.toMatchObject({
         status: 403,
-        code: 'sandbox_access_denied'
+        code: 'sandbox_access_denied',
+        keyId: KEY_ID
       })
     }
     expect(redis.set).not.toHaveBeenCalled()
+  })
+
+  test('only a verified active Key can discover its own identifier on grant denial', async () => {
+    const before = JSON.stringify([...redis.keys])
+    const denied = await service.verify(KEY).catch((error) => error)
+    expect(denied).toMatchObject({ status: 403, keyId: KEY_ID })
+    expect(JSON.stringify([...redis.keys])).toBe(before)
+    expect(redis.set).not.toHaveBeenCalled()
+    expect(redis.del).not.toHaveBeenCalled()
+    for (const patch of [
+      { isActive: 'false' },
+      { isActive: 'true', expiresAt: '2025-01-01T00:00:00Z' },
+      { expiresAt: '', expirationMode: 'activation', isActivated: 'false' }
+    ]) {
+      Object.assign(redis.keys.get(KEY_ID), patch)
+      const invalid = await service.verify(KEY).catch((error) => error)
+      expect(invalid.status).toBe(401)
+      expect(invalid).not.toHaveProperty('keyId')
+    }
+    redis.hget.mockRejectedValue(new Error(KEY_ID))
+    const unavailable = await service.verify(KEY).catch((error) => error)
+    expect(unavailable.status).toBe(503)
+    expect(unavailable).not.toHaveProperty('keyId')
   })
 
   test('explicit grant returns only safe metadata and does not touch model state', async () => {

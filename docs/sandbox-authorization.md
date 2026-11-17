@@ -67,6 +67,8 @@ Success is HTTP200 with:
 
 The verifier checks the current salted Key digest, enabled/deleted/expiry state and associated user's enabled state. It reads current and legacy hash indexes without backfilling or deleting them. Activation-mode Keys that have not been activated return401; use a fixed/explicitly activated Key. This endpoint does not activate Keys, update last-use data, query or consume model usage, reserve model concurrency, or apply model client/permissions restrictions. Model `permissions=[]/all` grants no Sandbox permission. An absent, disabled, expired, or revoked Sandbox grant returns403. Invalid credentials return401, malformed requests400/415, and backend failures503 with sanitized errors. No fallback to Admin or another Key occurs.
 
+A valid, active Key without an active grant receives `{"active":false,"error":"sandbox_access_denied","key_id":"its-own-key-id"}`. This self-identification runs only after the credential digest, Key lifecycle and owner checks have succeeded;401 and503 responses never contain a Key ID. An operator can use this non-secret ID for a deliberate Admin grant without moving the raw Key to the operator's machine or calling model `key-info`. It confers no Sandbox access, caller identity, grant metadata or model permission.
+
 ## Revocation status for an already authorized gateway capability
 
 `POST /auth/sandbox/status` accepts only:

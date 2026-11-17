@@ -22,18 +22,26 @@ const ERROR_STATUS = Object.freeze({
 })
 
 class SandboxAuthorizationError extends Error {
-  constructor(code) {
+  constructor(code, keyId) {
     const safe = Object.hasOwn(ERROR_STATUS, code) ? code : 'sandbox_authorization_unavailable'
     super(safe)
     this.name = 'SandboxAuthorizationError'
     this.code = safe
     this.status = ERROR_STATUS[safe]
+    // Only a fully verified caller may learn its own non-secret identifier.
+    if (safe === 'sandbox_access_denied' && typeof keyId === 'string' && ID.test(keyId)) {
+      this.keyId = keyId
+    }
   }
 }
 
 function sendSandboxAuthorizationError(res, error) {
   const safe = error instanceof SandboxAuthorizationError ? error : new SandboxAuthorizationError()
-  return res.status(safe.status).json({ active: false, error: safe.code })
+  return res.status(safe.status).json({
+    active: false,
+    error: safe.code,
+    ...(safe.keyId ? { key_id: safe.keyId } : {})
+  })
 }
 
 function checkId(value) {
@@ -256,7 +264,7 @@ function createSandboxAuthorizationService({ redis, security, getUser, now = Dat
       }
       const grant = await readGrant(db, keyId)
       if (!grantActive(grant)) {
-        throw new SandboxAuthorizationError('sandbox_access_denied')
+        throw new SandboxAuthorizationError('sandbox_access_denied', keyId)
       }
       const dates = [state.expires_at, grant.expires_at].filter(Boolean)
       const expires_at = dates.length

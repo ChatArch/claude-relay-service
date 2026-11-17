@@ -147,6 +147,31 @@ describe('Sandbox verification and grant HTTP contracts', () => {
     }
   )
 
+  test('grant denial reveals only the verified caller Key ID for operator enrollment', async () => {
+    service.verify.mockRejectedValue(
+      new SandboxAuthorizationError('sandbox_access_denied', 'key-1')
+    )
+    const response = await request(app)
+      .post('/auth/sandbox/verify')
+      .set('Authorization', `Bearer ${key}`)
+      .send({})
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      active: false,
+      error: 'sandbox_access_denied',
+      key_id: 'key-1'
+    })
+    expect(response.headers['cache-control']).toBe('no-store')
+    for (const code of ['invalid_sandbox_key', 'sandbox_authorization_unavailable']) {
+      service.verify.mockRejectedValue(new SandboxAuthorizationError(code, 'key-1'))
+      const invalid = await request(app)
+        .post('/auth/sandbox/verify')
+        .set('Authorization', `Bearer ${key}`)
+        .send({})
+      expect(invalid.body).not.toHaveProperty('key_id')
+    }
+  })
+
   test.each(['get', 'put', 'delete'])(
     'grant %s requires explicit existing admin session',
     async (method) => {
