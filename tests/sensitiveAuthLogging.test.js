@@ -19,7 +19,7 @@ jest.mock('../src/utils/logger', () => ({
 const express = require('express')
 const request = require('supertest')
 const logger = require('../src/utils/logger')
-const { requestLogger } = require('../src/middleware/auth')
+const { requestLogger, errorHandler } = require('../src/middleware/auth')
 const { skipSensitiveAuthLogging } = require('../src/middleware/authLogPolicy')
 const SECRET = 'synthetic-credential-never-log'
 
@@ -47,6 +47,7 @@ describe('sensitive authentication HTTP logging', () => {
       req._authInfo = { token: SECRET }
       res.json({ success: true, token: SECRET })
     })
+    app.use(errorHandler)
   })
 
   test.each([
@@ -95,6 +96,20 @@ describe('sensitive authentication HTTP logging', () => {
     expect(metadata.req).toEqual({ model: 'synthetic-model' })
     expect(metadata.res).toEqual(response.body)
     expect(metadata.query).toBe('trace=ordinary')
+  })
+
+  test('malformed auth JSON and error metadata cannot disclose the rejected credential', async () => {
+    const response = await request(app)
+      .post(`/web/auth/login?token=${SECRET}`)
+      .set('User-Agent', SECRET)
+      .set('Content-Type', 'application/json')
+      .send(`{"password":"${SECRET}",INVALID}`)
+    expect(response.status).toBe(400)
+    expect(logger.error).toHaveBeenCalled()
+    expect(debug).not.toHaveBeenCalled()
+    expect(JSON.stringify(Object.values(logger).flatMap((fn) => fn.mock.calls))).not.toContain(
+      SECRET
+    )
   })
 
   test('auth error and slow-request logs omit arbitrary exception text and query', () => {

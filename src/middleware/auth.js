@@ -1939,17 +1939,20 @@ const securityMiddleware = (req, res, next) => {
 const errorHandler = (error, req, res, _next) => {
   const requestId = req.requestId || 'unknown'
   const isDevelopment = process.env.NODE_ENV === 'development'
+  const isSensitiveAuthRoute = isSensitiveAuthRequest(req)
 
   // 记录详细错误信息
   logger.error(`💥 [${requestId}] Unhandled error:`, {
-    error: error.message,
-    stack: error.stack,
-    url: req.originalUrl,
+    error: isSensitiveAuthRoute ? '[omitted-sensitive-auth]' : error.message,
+    stack: isSensitiveAuthRoute ? undefined : error.stack,
+    url: authLogUrl(req),
     method: req.method,
     ip: req.ip || 'unknown',
-    userAgent: req.get('User-Agent') || 'unknown',
-    apiKey: req.apiKey ? req.apiKey.id : 'none',
-    admin: req.admin ? req.admin.username : 'none'
+    userAgent: isSensitiveAuthRoute
+      ? '[omitted-sensitive-auth]'
+      : req.get('User-Agent') || 'unknown',
+    apiKey: !isSensitiveAuthRoute && req.apiKey ? req.apiKey.id : 'none',
+    admin: !isSensitiveAuthRoute && req.admin ? req.admin.username : 'none'
   })
 
   // 确定HTTP状态码
