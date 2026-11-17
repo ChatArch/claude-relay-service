@@ -28,6 +28,7 @@ const droidRoutes = require('./routes/droidRoutes')
 const userRoutes = require('./routes/userRoutes')
 const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
+const { createSandboxVerificationRouter } = require('./routes/sandboxAuthorization')
 
 // Import middleware
 const {
@@ -217,6 +218,10 @@ class Application {
 
       // 📝 请求日志（使用自定义logger而不是morgan）
       this.app.use(requestLogger)
+
+      // Sandbox credential checks have their own small JSON limit and never
+      // enter model/debug middleware or the general 100 MB body parser.
+      this.app.use('/auth/sandbox', createSandboxVerificationRouter())
 
       // 🐛 HTTP调试拦截器（仅在启用调试时生效）
       if (process.env.DEBUG_HTTP_TRAFFIC === 'true') {

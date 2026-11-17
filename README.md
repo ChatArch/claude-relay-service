@@ -69,6 +69,8 @@
 
 ## 🚀 核心功能
 
+Sandbox服务可通过[独立Key授权接口](docs/sandbox-authorization.md)复用CRS凭据生命周期与显式grant；其验证不进入模型计费/并发或首次激活流程，业务资源归属及CPU/内存/TTL配额由Sandbox服务管理。
+
 ### 基础功能
 
 - ✅ **多账户管理**: 可以添加多个Claude账户自动轮换
