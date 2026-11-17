@@ -82,6 +82,19 @@ describe('independent Sandbox authorization', () => {
     expect(redis.set).not.toHaveBeenCalled()
   })
 
+  test('Sandbox-only Key permissions still require an explicit grant', async () => {
+    redis.keys.get(KEY_ID).permissions = '["sandbox"]'
+    await expect(service.verify(KEY)).rejects.toMatchObject({
+      status: 403,
+      code: 'sandbox_access_denied'
+    })
+    await service.put(KEY_ID, grantInput())
+    await expect(service.verify(KEY)).resolves.toMatchObject({
+      active: true,
+      caller_id: 'trusted-caller'
+    })
+  })
+
   test('only a verified active Key can discover its own identifier on grant denial', async () => {
     const before = JSON.stringify([...redis.keys])
     const denied = await service.verify(KEY).catch((error) => error)

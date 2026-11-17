@@ -62,6 +62,24 @@ const CostCalculator = require('../src/utils/costCalculator')
 const apiKeyService = require('../src/services/apiKeyService')
 
 describe('apiKeyService openai responses config', () => {
+  test.each([[['sandbox']], ['sandbox'], ['["sandbox"]']])(
+    'Sandbox-only permissions %p reject every model service',
+    (permissions) => {
+      for (const service of ['claude', 'gemini', 'openai', 'droid']) {
+        expect(apiKeyService.hasPermission(permissions, service)).toBe(false)
+      }
+    }
+  )
+
+  test.each([[[]], ['all'], [null], [undefined]])(
+    'legacy all-model permissions %p are unchanged',
+    (permissions) => {
+      for (const service of ['claude', 'gemini', 'openai', 'droid']) {
+        expect(apiKeyService.hasPermission(permissions, service)).toBe(true)
+      }
+    }
+  )
+
   beforeEach(() => {
     jest.clearAllMocks()
     redis.getApiKey.mockResolvedValue({
@@ -93,6 +111,15 @@ describe('apiKeyService openai responses config', () => {
     expect(result.enableOpenAIResponsesCodexAdaptation).toBe(true)
     expect(result.enableOpenAIResponsesPayloadRules).toBe(false)
     expect(result.openaiResponsesPayloadRules).toEqual([])
+  })
+
+  test('generateApiKey preserves explicit Sandbox-only permissions', async () => {
+    const result = await apiKeyService.generateApiKey({
+      name: 'Sandbox-only client',
+      permissions: ['sandbox']
+    })
+    expect(redis.setApiKey.mock.calls[0][1].permissions).toBe('["sandbox"]')
+    expect(result.permissions).toEqual(['sandbox'])
   })
 
   test('updateApiKey serializes toggle and payload rule fields', async () => {

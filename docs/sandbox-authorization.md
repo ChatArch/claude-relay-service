@@ -4,6 +4,20 @@ CRS can verify an existing caller API Key for an explicitly granted Sandbox serv
 
 ## Operator grant
 
+For a new application that only needs Sandbox access, create its CRS Key through
+`POST /admin/api-keys` with explicit `"permissions":["sandbox"]` and a fixed
+expiry, then assign the independent grant below. The same permissions value is
+accepted by the single/batch create and update routes. Pure Sandbox permissions
+are rejected by the shared model authentication middleware with HTTP403 before
+client checks, concurrency reservation or model dispatch, including Azure OpenAI
+and token-count routes. Adding a model permission deliberately enables that model
+service alongside Sandbox use; its ordinary service checks still apply.
+
+`permissions:[]`, omitted permissions and the legacy `all` value retain their
+existing meaning of all model services. They do not mean Sandbox-only. Conversely,
+`permissions:["sandbox"]` alone grants no Sandbox access: a valid, enabled Key
+still requires its own explicit grant, image allowlist and resource budget.
+
 Use an existing CRS Admin session as an explicit `Authorization: Bearer` header. These routes reject cookie-only requests, ordinary API Keys, Codex management Keys, and conflicting credentials. They do not log in or fall back to a second identity.
 
 | Method | Path                            | Result                                                          |
