@@ -1,4 +1,5 @@
 const logger = require('../utils/logger')
+const { isSensitiveAuthRequest } = require('./authLogPolicy')
 
 /**
  * 浏览器/Chrome插件兜底中间件
@@ -62,12 +63,14 @@ const browserFallbackMiddleware = (req, res, next) => {
       req.headers['anthropic-dangerous-direct-browser-access'] = 'true'
     }
 
-    logger.api(
-      `🔧 Browser fallback activated for ${isChromeExtension ? 'Chrome extension' : 'browser'} request`
-    )
-    logger.api(`   Original User-Agent: "${req.originalUserAgent}"`)
-    logger.api(`   Origin: "${origin}"`)
-    logger.api(`   Modified User-Agent: "${req.headers['user-agent']}"`)
+    if (!isSensitiveAuthRequest(req)) {
+      logger.api(
+        `🔧 Browser fallback activated for ${isChromeExtension ? 'Chrome extension' : 'browser'} request`
+      )
+      logger.api(`   Original User-Agent: "${req.originalUserAgent}"`)
+      logger.api(`   Origin: "${origin}"`)
+      logger.api(`   Modified User-Agent: "${req.headers['user-agent']}"`)
+    }
   }
 
   next()

@@ -10,6 +10,7 @@ const ClaudeCodeValidator = require('../validators/clients/claudeCodeValidator')
 const claudeRelayConfigService = require('../services/claudeRelayConfigService')
 const { calculateWaitTimeStats } = require('../utils/statsHelper')
 const { isClaudeFamilyModel } = require('../utils/modelHelper')
+const { isSensitiveAuthRequest, authLogUrl } = require('./authLogPolicy')
 
 // 工具函数
 function sleep(ms) {
@@ -1765,6 +1766,8 @@ const corsMiddleware = (req, res, next) => {
 const requestLogger = (req, res, next) => {
   const start = Date.now()
   const requestId = Math.random().toString(36).substring(2, 15)
+  const isSensitiveAuthRoute = isSensitiveAuthRequest(req)
+  const logUrl = authLogUrl(req)
 
   // 添加请求ID到请求对象
   req.requestId = requestId
@@ -1773,22 +1776,25 @@ const requestLogger = (req, res, next) => {
 
   // 获取客户端信息
   const clientIP = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown'
-  const userAgent = req.get('User-Agent') || 'unknown'
-  const referer = req.get('Referer') || 'none'
+  const userAgent = isSensitiveAuthRoute
+    ? '[omitted-sensitive-auth]'
+    : req.get('User-Agent') || 'unknown'
+  const referer = isSensitiveAuthRoute ? '[omitted-sensitive-auth]' : req.get('Referer') || 'none'
 
   // 请求开始 → debug 级别（减少正常请求的日志量）
   const isDebugRoute = req.originalUrl.includes('event_logging')
   if (req.originalUrl !== '/health') {
-    logger.debug(`▶ [${requestId}] ${req.method} ${req.originalUrl}`, {
+    logger.debug(`▶ [${requestId}] ${req.method} ${logUrl}`, {
       ip: clientIP,
-      body: req.body && Object.keys(req.body).length > 0 ? req.body : undefined
+      body:
+        !isSensitiveAuthRoute && req.body && Object.keys(req.body).length > 0 ? req.body : undefined
     })
   }
 
   // 拦截 res.json() 捕获响应体
   const originalJson = res.json.bind(res)
   res.json = (body) => {
-    res._responseBody = body
+    res._responseBody = isSensitiveAuthRoute ? undefined : body
     return originalJson(body)
   }
 
@@ -1805,34 +1811,39 @@ const requestLogger = (req, res, next) => {
     const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info'
 
     // 主消息行
-    const msg = `${emoji} ${status} ${req.method} ${req.originalUrl}  ${duration}ms ${contentLength}B`
+    const msg = `${emoji} ${status} ${req.method} ${logUrl}  ${duration}ms ${contentLength}B`
 
     // 构建树形 metadata
     const meta = { requestId }
 
     // 请求体（非 GET 且有内容时显示）
-    if (req.method !== 'GET' && req.body && Object.keys(req.body).length > 0) {
+    if (
+      !isSensitiveAuthRoute &&
+      req.method !== 'GET' &&
+      req.body &&
+      Object.keys(req.body).length > 0
+    ) {
       meta.req = req.body
     }
 
     // 查询参数（GET 请求且有查询参数时单独显示）
     const queryIdx = req.originalUrl.indexOf('?')
-    if (queryIdx > -1) {
+    if (!isSensitiveAuthRoute && queryIdx > -1) {
       meta.query = req.originalUrl.substring(queryIdx + 1)
     }
 
     // 响应体
-    if (res._responseBody) {
+    if (!isSensitiveAuthRoute && res._responseBody) {
       meta.res = res._responseBody
     }
 
     // API Key 信息（合并到同一条日志）
-    if (req.apiKey) {
+    if (!isSensitiveAuthRoute && req.apiKey) {
       meta.key = `${req.apiKey.name} (${req.apiKey.id})`
     }
 
     // 认证信息
-    if (req._authInfo) {
+    if (!isSensitiveAuthRoute && req._authInfo) {
       meta.auth = req._authInfo
     }
 
@@ -1849,13 +1860,16 @@ const requestLogger = (req, res, next) => {
 
     // 慢请求警告
     if (duration > 5000) {
-      logger.warn(`🐌 Slow request: ${duration}ms ${req.method} ${req.originalUrl}`)
+      logger.warn(`🐌 Slow request: ${duration}ms ${req.method} ${logUrl}`)
     }
   })
 
   res.on('error', (error) => {
     const duration = Date.now() - start
-    logger.error(`💥 [${requestId}] Response error after ${duration}ms:`, error)
+    logger.error(
+      `💥 [${requestId}] Response error after ${duration}ms:`,
+      isSensitiveAuthRoute ? '[omitted-sensitive-auth]' : error
+    )
   })
 
   next()
@@ -1925,17 +1939,20 @@ const securityMiddleware = (req, res, next) => {
 const errorHandler = (error, req, res, _next) => {
   const requestId = req.requestId || 'unknown'
   const isDevelopment = process.env.NODE_ENV === 'development'
+  const isSensitiveAuthRoute = isSensitiveAuthRequest(req)
 
   // 记录详细错误信息
   logger.error(`💥 [${requestId}] Unhandled error:`, {
-    error: error.message,
-    stack: error.stack,
-    url: req.originalUrl,
+    error: isSensitiveAuthRoute ? '[omitted-sensitive-auth]' : error.message,
+    stack: isSensitiveAuthRoute ? undefined : error.stack,
+    url: authLogUrl(req),
     method: req.method,
     ip: req.ip || 'unknown',
-    userAgent: req.get('User-Agent') || 'unknown',
-    apiKey: req.apiKey ? req.apiKey.id : 'none',
-    admin: req.admin ? req.admin.username : 'none'
+    userAgent: isSensitiveAuthRoute
+      ? '[omitted-sensitive-auth]'
+      : req.get('User-Agent') || 'unknown',
+    apiKey: !isSensitiveAuthRoute && req.apiKey ? req.apiKey.id : 'none',
+    admin: !isSensitiveAuthRoute && req.admin ? req.admin.username : 'none'
   })
 
   // 确定HTTP状态码
