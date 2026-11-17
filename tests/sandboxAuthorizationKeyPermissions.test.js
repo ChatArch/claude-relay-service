@@ -68,6 +68,7 @@ describe('Sandbox-only Key permissions at HTTP boundaries', () => {
     app.use(express.json())
     app.use('/admin', adminKeys)
     modelDispatch = jest.fn((_req, res) => res.json({ unexpected: 'model-dispatch' }))
+    // Exercise the shared middleware boundary; production routers dispatch later.
     app.use(auth.authenticateApiKey, modelDispatch)
   })
 
@@ -116,9 +117,9 @@ describe('Sandbox-only Key permissions at HTTP boundaries', () => {
     '/api/v1/messages/count_tokens',
     '/openai/v1/responses',
     '/gemini/v1beta/models/test:generateContent',
-    '/azure-openai/chat/completions',
-    '/azure-openai/embeddings',
-    '/droid/v1/responses',
+    '/azure/chat/completions',
+    '/azure/embeddings',
+    '/droid/openai/v1/responses',
     '/v1/chat/completions'
   ])('rejects model endpoint %s before client/concurrency checks or dispatch', async (path) => {
     const response = await request(app)
@@ -138,7 +139,7 @@ describe('Sandbox-only Key permissions at HTTP boundaries', () => {
       keyData: { permissions: '["sandbox"]' }
     })
     const response = await request(app)
-      .get('/azure-openai/models')
+      .get('/azure/models')
       .set('x-api-key', 'cr_synthetic-sandbox-only-key')
     expect(response.status).toBe(403)
     expect(modelDispatch).not.toHaveBeenCalled()
