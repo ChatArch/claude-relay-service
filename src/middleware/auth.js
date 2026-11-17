@@ -482,6 +482,19 @@ const authenticateApiKey = async (req, res, next) => {
       })
     }
 
+    // Sandbox verification has its own route and grant. Deny model middleware
+    // explicitly, including routes without a per-service permission check.
+    const permissions = apiKeyService.normalizePermissions(validation.keyData.permissions)
+    if (permissions.length > 0 && permissions.every((permission) => permission === 'sandbox')) {
+      return res.status(403).json({
+        error: {
+          type: 'permission_denied',
+          code: 'sandbox_only_key',
+          message: 'This API key is restricted to the Sandbox service'
+        }
+      })
+    }
+
     const skipKeyRestrictions = isTokenCountRequest(req)
 
     // 🔒 检查客户端限制（使用新的验证器）
