@@ -170,8 +170,9 @@ describe('independent Sandbox authorization', () => {
       { max_ttl_seconds: 21601 },
       { max_cpu_millis: 32001 }
     ]) {
-      await expect(service.put(KEY_ID, { ...grantInput(), limits: { ...limits, ...excess } }))
-        .rejects.toMatchObject({ status: 400 })
+      await expect(
+        service.put(KEY_ID, { ...grantInput(), limits: { ...limits, ...excess } })
+      ).rejects.toMatchObject({ status: 400 })
     }
   })
 
