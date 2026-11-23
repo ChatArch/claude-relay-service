@@ -155,6 +155,27 @@ describe('independent Sandbox authorization', () => {
     )
   })
 
+  test('accepts one bounded 256 GiB six-hour Sandbox grant but rejects larger limits', async () => {
+    const limits = {
+      max_sandboxes: 1,
+      max_cpu_millis: 32000,
+      max_memory_mib: 262144,
+      max_ttl_seconds: 21600
+    }
+    const saved = await service.put(KEY_ID, { ...grantInput(), limits })
+    expect(saved.limits).toEqual(limits)
+    expect((await service.verify(KEY)).grant.limits).toEqual(limits)
+    for (const excess of [
+      { max_memory_mib: 262145 },
+      { max_ttl_seconds: 21601 },
+      { max_cpu_millis: 32001 }
+    ]) {
+      await expect(
+        service.put(KEY_ID, { ...grantInput(), limits: { ...limits, ...excess } })
+      ).rejects.toMatchObject({ status: 400 })
+    }
+  })
+
   test.each([
     { isActive: 'false' },
     { isDeleted: 'true' },

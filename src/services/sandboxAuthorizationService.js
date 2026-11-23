@@ -123,8 +123,8 @@ function validateGrant(input) {
   const bounds = {
     max_sandboxes: [1, 32],
     max_cpu_millis: [1, 32000],
-    max_memory_mib: [128, 98304],
-    max_ttl_seconds: [60, 7200]
+    max_memory_mib: [128, 262144],
+    max_ttl_seconds: [60, 21600]
   }
   if (
     !limits ||
