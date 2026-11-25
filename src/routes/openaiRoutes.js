@@ -8,6 +8,7 @@ const unifiedOpenAIScheduler = require('../services/scheduler/unifiedOpenAISched
 const openaiAccountService = require('../services/account/openaiAccountService')
 const openaiResponsesAccountService = require('../services/account/openaiResponsesAccountService')
 const openaiResponsesRelayService = require('../services/relay/openaiResponsesRelayService')
+const openaiModelCatalogService = require('../services/openaiModelCatalogService')
 const apiKeyService = require('../services/apiKeyService')
 const modelService = require('../services/modelService')
 const redis = require('../models/redis')
@@ -1349,7 +1350,7 @@ async function handleImages(req, res) {
 router.post('/images/generations', authenticateApiKey, handleImages)
 router.post('/v1/images/generations', authenticateApiKey, handleImages)
 
-function handleModels(req, res) {
+async function handleModels(req, res) {
   if (!checkOpenAIPermissions(req.apiKey)) {
     return res.status(403).json({
       error: {
@@ -1360,13 +1361,25 @@ function handleModels(req, res) {
     })
   }
 
-  let models = modelService.getModelsByProvider('openai')
+  let models
+  let source = 'bootstrap'
+
+  try {
+    const result = await openaiModelCatalogService.getModelsForRequest(req.apiKey)
+    ;({ models, source } = result)
+  } catch (error) {
+    logger.warn(`Failed to discover OpenAI models from upstream: ${error.message}`)
+    models = modelService.getModelsByProvider('openai')
+  }
+
   if (req.apiKey.enableModelRestriction && req.apiKey.restrictedModels?.length > 0) {
     models = models.filter((model) => !req.apiKey.restrictedModels.includes(model.id))
   }
+  res.set('X-CRS-Model-Source', source)
   return res.json({ object: 'list', data: models })
 }
 
+router.get('/models', authenticateApiKey, handleModels)
 router.get('/v1/models', authenticateApiKey, handleModels)
 
 router.post('/responses', authenticateApiKey, handleResponses)
