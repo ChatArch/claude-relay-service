@@ -138,4 +138,30 @@ describe('OpenAI model catalog discovery', () => {
     expect(second.source).toBe('cache')
     expect(axios.get).toHaveBeenCalledTimes(1)
   })
+
+  test('retains the last successful catalog after a refresh failure', async () => {
+    const account = { id: 'account-4', accountId: 'chatgpt-account-4', proxy: null }
+    axios.get.mockResolvedValueOnce({
+      status: 200,
+      data: { models: [{ slug: 'gpt-6.2-sol' }] }
+    })
+    await service.getModelsForAccount({
+      account,
+      accountId: 'account-4',
+      accountType: 'openai',
+      accessToken: 'token'
+    })
+
+    service.cache.get('openai:account-4').expiresAt = 0
+    axios.get.mockRejectedValueOnce(new Error('network unavailable'))
+    const result = await service.getModelsForAccount({
+      account,
+      accountId: 'account-4',
+      accountType: 'openai',
+      accessToken: 'token'
+    })
+
+    expect(result.source).toBe('stale')
+    expect(result.models.map((model) => model.id)).toEqual(['gpt-6.2-sol'])
+  })
 })
