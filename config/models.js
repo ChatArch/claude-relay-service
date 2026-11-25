@@ -33,20 +33,10 @@ const GROK_MODELS = [
 ]
 
 const OPENAI_MODELS = [
-  { value: 'gpt-5', label: 'GPT-5' },
-  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-  { value: 'gpt-5-nano', label: 'GPT-5 Nano' },
-  { value: 'gpt-5.1', label: 'GPT-5.1' },
-  { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini' },
-  { value: 'gpt-5.2', label: 'GPT-5.2' },
-  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-  { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-  { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-  { value: 'gpt-5.4', label: 'GPT-5.4' },
-  { value: 'gpt-5.4-pro', label: 'GPT-5.4 Pro' },
-  { value: 'codex-mini', label: 'Codex Mini' }
+  { value: 'gpt-6.2-astra', label: 'GPT-6.2 Astra' },
+  { value: 'gpt-6.2-sol', label: 'GPT-6.2 Sol' },
+  { value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
+  { value: 'gpt-6-luna', label: 'GPT-6 Luna' }
 ]
 
 const BEDROCK_MODELS = [
