@@ -28,12 +28,6 @@ jest.mock('../src/utils/requestDetailHelper', () => ({}))
 jest.mock('../src/services/apiKeyService', () => ({
   hasPermission: jest.fn((permissions, service) => permissions?.includes(service))
 }))
-jest.mock('../src/services/modelService', () => ({
-  getModelsByProvider: jest.fn(() => [
-    { id: 'gpt-5.4', object: 'model', owned_by: 'openai' },
-    { id: 'gpt-5.6-sol', object: 'model', owned_by: 'openai' }
-  ])
-}))
 jest.mock('../src/middleware/auth', () => ({
   authenticateApiKey: (req, res, next) => {
     if (req.headers.authorization !== 'Bearer test-key') {
@@ -48,7 +42,6 @@ jest.mock('../src/middleware/auth', () => ({
   }
 }))
 
-const modelService = require('../src/services/modelService')
 const openaiModelCatalogService = require('../src/services/openaiModelCatalogService')
 const openaiRoutes = require('../src/routes/openaiRoutes')
 const app = express()
@@ -56,14 +49,13 @@ app.use('/openai', openaiRoutes)
 
 describe('OpenAI model discovery', () => {
   beforeEach(() => {
-    modelService.getModelsByProvider.mockClear()
     openaiModelCatalogService.getModelsForRequest.mockClear()
   })
 
   test('requires API key authentication', async () => {
     const res = await request(app).get('/openai/v1/models')
     expect(res.status).toBe(401)
-    expect(modelService.getModelsByProvider).not.toHaveBeenCalled()
+    expect(openaiModelCatalogService.getModelsForRequest).not.toHaveBeenCalled()
   })
 
   test('requires OpenAI permission', async () => {
@@ -72,7 +64,7 @@ describe('OpenAI model discovery', () => {
       .set('Authorization', 'Bearer test-key')
       .set('x-test-permissions', 'claude')
     expect(res.status).toBe(403)
-    expect(modelService.getModelsByProvider).not.toHaveBeenCalled()
+    expect(openaiModelCatalogService.getModelsForRequest).not.toHaveBeenCalled()
   })
 
   test('returns only OpenAI models allowed by the key', async () => {
@@ -96,17 +88,13 @@ describe('OpenAI model discovery', () => {
     expect(res.body.data.map((model) => model.id)).toEqual(['gpt-5.4', 'gpt-6.2-sol'])
   })
 
-  test('falls back to the current bootstrap catalog when upstream discovery fails', async () => {
+  test('does not claim availability without a successful upstream catalog', async () => {
     openaiModelCatalogService.getModelsForRequest.mockRejectedValueOnce(new Error('upstream down'))
-    modelService.getModelsByProvider.mockReturnValueOnce([
-      { id: 'gpt-6.2-sol', object: 'model', owned_by: 'openai' }
-    ])
 
     const res = await request(app).get('/openai/v1/models').set('Authorization', 'Bearer test-key')
 
-    expect(res.status).toBe(200)
-    expect(modelService.getModelsByProvider).toHaveBeenCalledWith('openai')
-    expect(res.headers['x-crs-model-source']).toBe('bootstrap')
-    expect(res.body.data).toEqual([{ id: 'gpt-6.2-sol', object: 'model', owned_by: 'openai' }])
+    expect(res.status).toBe(503)
+    expect(res.headers['x-crs-model-source']).toBeUndefined()
+    expect(res.body.error.code).toBe('model_catalog_unavailable')
   })
 })

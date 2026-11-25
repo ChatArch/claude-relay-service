@@ -10,7 +10,6 @@ const openaiResponsesAccountService = require('../services/account/openaiRespons
 const openaiResponsesRelayService = require('../services/relay/openaiResponsesRelayService')
 const openaiModelCatalogService = require('../services/openaiModelCatalogService')
 const apiKeyService = require('../services/apiKeyService')
-const modelService = require('../services/modelService')
 const redis = require('../models/redis')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
@@ -1361,22 +1360,24 @@ async function handleModels(req, res) {
     })
   }
 
-  let models
-  let source = 'bootstrap'
-
   try {
-    const result = await openaiModelCatalogService.getModelsForRequest(req.apiKey)
-    ;({ models, source } = result)
+    const { models, source } = await openaiModelCatalogService.getModelsForRequest(req.apiKey)
+    const visibleModels =
+      req.apiKey.enableModelRestriction && req.apiKey.restrictedModels?.length > 0
+        ? models.filter((model) => !req.apiKey.restrictedModels.includes(model.id))
+        : models
+    res.set('X-CRS-Model-Source', source)
+    return res.json({ object: 'list', data: visibleModels })
   } catch (error) {
     logger.warn(`Failed to discover OpenAI models from upstream: ${error.message}`)
-    models = modelService.getModelsByProvider('openai')
+    return res.status(503).json({
+      error: {
+        message: 'OpenAI model catalog is temporarily unavailable',
+        type: 'service_unavailable',
+        code: 'model_catalog_unavailable'
+      }
+    })
   }
-
-  if (req.apiKey.enableModelRestriction && req.apiKey.restrictedModels?.length > 0) {
-    models = models.filter((model) => !req.apiKey.restrictedModels.includes(model.id))
-  }
-  res.set('X-CRS-Model-Source', source)
-  return res.json({ object: 'list', data: models })
 }
 
 router.get('/models', authenticateApiKey, handleModels)
